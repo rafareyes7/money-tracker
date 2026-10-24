@@ -1,0 +1,5 @@
+{"version":2,"exportDate":"2026-10-24T10:00:00Z","activeProfileId":"default","profiles":{"default":{"name":"Ejemplo","budgets":{
+"Rent":{"total":900,"tags":{},"type":"fixed"},"Groceries":{"total":500,"tags":{},"type":"variable"},"Health Insurance":{"total":300,"tags":{},"type":"fixed"},
+"House Services":{"total":250,"tags":{"electricidad":100,"agua":40,"internet":50},"type":"fixed"},"Extra":{"total":150,"tags":{},"type":"variable"},
+"Investment":{"total":200,"tags":{},"type":"fixed"},"Eating out":{"total":120,"tags":{},"type":"variable"},"Clothing":{"total":50,"tags":{},"type":"variable"},
+"Subscriptions":{"total":30,"tags":{},"type":"fixed"},"HouseHold":{"total":30,"tags":{},"type":"variable"},"Transporte":{"total":40,"tags":{},"type":"variable"}}}}}
