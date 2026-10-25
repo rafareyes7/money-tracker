@@ -1,6 +1,6 @@
 /* service-worker.js — Cache-first: tras la primera visita la app funciona sin conexión.
    Al publicar una versión nueva, cambia CACHE para que se descargue de nuevo. */
-const CACHE = 'conciliador-v1.2.3';
+const CACHE = 'conciliador-v1.3.0';
 const ASSETS = [
   './',
   'index.html',

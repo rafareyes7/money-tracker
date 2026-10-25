@@ -633,6 +633,7 @@
    */
   function summarize(entries, budget, meta, period, today) {
     meta = meta || {}; const bcats = (budget && budget.cats) || {};
+    const closedMap = (budget && budget.closed) || {}; // { 'Cat': true, 'Cat|sub': true }: lo que queda no se gastará/pagará este periodo
     const live = entries.filter((e) => e.treatment !== 'excluded');
     let income = 0;
     const spent = {}, subSpent = {}, byCat = {};
@@ -654,17 +655,23 @@
     const names = new Set([...Object.keys(bcats).filter((c) => (bcats[c].cents || 0) > 0), ...Object.keys(spent)]);
     const cats = [...names].map((name) => {
       const m = meta[name] || {};
-      const b = (bcats[name] && bcats[name].cents) || 0;
+      const original = (bcats[name] && bcats[name].cents) || 0;
       const s = spent[name] || 0;
-      const pct = b > 0 ? Math.round((s / b) * 100) : (s > 0 ? 999 : 0);
       const subsB = (bcats[name] && bcats[name].subs) || {};
       const subNames = new Set([...Object.keys(subsB), ...Object.keys(subSpent[name] || {}).filter(Boolean)]);
-      const subs = [...subNames].map((sn) => ({ name: sn, budget: subsB[sn] || 0, spent: (subSpent[name] || {})[sn] || 0 }))
-        .sort((x, y) => y.budget - x.budget || y.spent - x.spent);
+      const subs = [...subNames].map((sn) => {
+        const sb = subsB[sn] || 0, ss = (subSpent[name] || {})[sn] || 0, cl = !!closedMap[name + '|' + sn];
+        return { name: sn, budget: cl ? Math.min(sb, Math.max(ss, 0)) : sb, originalBudget: sb, spent: ss, closed: cl };
+      }).sort((x, y) => y.budget - x.budget || y.spent - x.spent);
+      const closed = !!closedMap[name];
+      // Cerrada: el presupuesto efectivo es lo gastado (si te pasaste, se mantiene el exceso).
+      let b = closed ? Math.min(original, Math.max(s, 0)) : original;
+      if (!closed) subs.forEach((x) => { if (x.closed) b -= x.originalBudget - x.budget; });
+      const pct = b > 0 ? Math.round((s / b) * 100) : (s > 0 ? (closed ? 100 : 999) : 0);
       return {
         name, type: m.type === 'fixed' ? 'fixed' : 'variable', savings: !!m.savings, estimate: !!m.estimate,
-        dueDay: m.dueDay || null, subDue: m.subDue || {}, budget: b, spent: s, remaining: b - s, pct, color: colorFor(pct),
-        subs, entries: byCat[name] || [],
+        dueDay: m.dueDay || null, subDue: m.subDue || {}, budget: b, originalBudget: original, closed, spent: s,
+        remaining: b - s, pct, color: closed && s <= original ? 'n' : colorFor(pct), subs, entries: byCat[name] || [],
       };
     }).sort((a, b) => b.budget - a.budget || b.spent - a.spent);
 

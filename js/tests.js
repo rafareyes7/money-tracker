@@ -213,6 +213,20 @@
     const led2 = C.buildLedger({ movements: { t1: t, b2: { source: 'bank', id: 'b2', date: '2026-10-09', cents: -4000, description: 'Pago en BAR', comment: 'con amigos' } }, matches: m, decisions: {}, rules: [] });
     eq(led2[0].comment, 'con amigos');
   });
+  test('Cerrar una categoría o un pago pendiente del periodo', () => {
+    const P = C.getPeriod('2026-09');
+    const E = (cat, cents, sub) => ({ id: cat + cents, date: '2026-10-01', cents, treatment: 'expense', category: cat, subcategory: sub || '' });
+    const entries = [E('HouseHold', 2500), E('House Services', 4000, 'agua')];
+    const budget = { cats: { HouseHold: { cents: 5000 }, 'Health Insurance': { cents: 30000 }, 'House Services': { cents: 15000, subs: { agua: 5000, electricidad: 10000 } } } };
+    const meta = { 'Health Insurance': { type: 'fixed' }, 'House Services': { type: 'fixed' } };
+    const open = C.summarize(entries, budget, meta, P, '2026-10-25');
+    eq(open.available, 2500); eq(open.pendingTotal, 40000);
+    const closed = C.summarize(entries, Object.assign({}, budget, { closed: { HouseHold: true, 'Health Insurance': true, 'House Services|electricidad': true } }), meta, P, '2026-10-25');
+    eq(closed.available, 0, 'HouseHold cerrada: no queda nada');
+    eq(closed.cats.find((c) => c.name === 'HouseHold').budget, 2500);
+    eq(closed.pendingTotal, 0, 'nada por pagar');
+    eq(closed.budgetTotal, 2500 + 0 + 5000, 'presupuesto efectivo = lo gastado en lo cerrado');
+  });
   test('Día de pago deducido del historial', () => {
     const d = C.inferDueDays([{ category: 'Rent', treatment: 'expense', date: '2026-10-01' }, { category: 'House Services', subcategory: 'agua', treatment: 'expense', date: '2026-10-05' }], ['Rent', 'House Services']);
     eq(d.Rent, 1); eq(d['House Services|agua'], 5);

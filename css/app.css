@@ -163,6 +163,7 @@ select.chip.on { background-color: var(--text); }
 .suggest .t b { color: var(--accent); }
 .suggest .btn { min-height: 44px; width: 52px; padding: 0; }
 .mv .chips { margin-top: 8px; }
+.mini { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 0; color: var(--accent); font-size: 13px; font-weight: 600; }
 .comment { font-size: 13px; margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: var(--surface2); color: var(--text); overflow-wrap: anywhere; }
 .resolved-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
 .inline-select { min-height: 40px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); padding: 0 8px; max-width: 100%; }
@@ -209,6 +210,7 @@ select.chip.on { background-color: var(--text); }
 .bar .f { height: 100%; border-radius: 99px; max-width: 100%; }
 .bar .m { position: absolute; top: -3px; width: 2px; height: 16px; background: var(--text); opacity: .55; border-radius: 2px; }
 .f.g { background: var(--ok); } .f.a { background: var(--warn); } .f.r { background: var(--bad); }
+.f.n { background: var(--muted); opacity: .5; } .p.n { color: var(--muted); font-weight: 700; }
 .bud .foot { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
 .p.g { color: var(--ok); font-weight: 700; } .p.a { color: var(--warn); font-weight: 700; } .p.r { color: var(--bad); font-weight: 700; }
 .subcats { font-size: 12px; color: var(--muted); margin-top: 4px; }

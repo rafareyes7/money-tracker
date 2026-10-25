@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.2.3';
+  const APP_VERSION = '1.3.0';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -111,7 +111,9 @@
     id = id || UI.periodId;
     if (S.budgets[id]) return { budget: S.budgets[id], from: null };
     const prev = Object.keys(S.budgets).filter((k) => k < id).sort().pop() || Object.keys(S.budgets).sort().pop();
-    return prev ? { budget: S.budgets[prev], from: prev } : { budget: null, from: null };
+    if (!prev) return { budget: null, from: null };
+    const b = Object.assign({}, S.budgets[prev]); delete b.closed;
+    return { budget: b, from: prev };
   }
   function summary(id) {
     const info = budgetInfo(id);
@@ -268,7 +270,7 @@
       const dueTxt = it.due ? (it.due === today() ? 'Hoy' : it.due === C.addDays(today(), 1) ? 'Mañana' : it.due < today() ? 'Pendiente desde el día ' + Number(it.due.slice(8)) : 'Habitual día ' + Number(it.due.slice(8))) : 'Sin día de pago';
       const inf = meta[it.category] && meta[it.category].dueInferred ? ' · deducido' : '';
       h += '<div class="due"><div class="d">' + (it.due ? C.dowName(it.due) + '<b>' + Number(it.due.slice(8)) + '</b>' : '—') + '</div><div class="n">' + catIcon(it.category) + ' ' + esc(it.category) + (it.sub ? ' › ' + esc(it.sub) : '') +
-        '<div class="sub">' + dueTxt + inf + (it.estimate ? ' · estimado' : '') + '</div></div><span class="amt">' + est + money(it.cents) + '</span></div>';
+        '<div class="sub">' + dueTxt + inf + (it.estimate ? ' · estimado' : '') + '</div><button class="mini" data-a="close-item" data-v="' + esc(it.sub ? it.category + '|' + it.sub : it.category) + '">No se pagará este periodo</button></div><span class="amt">' + est + money(it.cents) + '</span></div>';
     });
     h += '</div>';
     if (s.paid.length) h += '<div class="sub" style="margin-top:6px">✓ Ya pagado: ' + s.paid.map((c) => esc(c.name)).join(', ') + ' · ' + money(s.paid.reduce((a, c) => a + c.spent, 0)) + '</div>';
@@ -776,7 +778,13 @@
         : (c.budget ? '<span class="pill ok">✓' + (lastPaid ? ' ' + C.formatDateShort(lastPaid) : '') + '</span>' : '<span class="pill bad">sin presupuesto</span>');
       const detail = (c.spent && c.spent !== c.budget ? money(c.spent) + ' de ' + money(c.budget) : money(c.budget || c.spent)) +
         (pend.some((x) => x.sub) ? ' · falta ' + pend.filter((x) => x.sub).map((x) => esc(x.sub)).join(', ') : '') + (m.dueInferred && pend.length ? ' · día deducido' : '');
-      h += '<button class="fixed" style="width:100%;text-align:left" data-a="cat-movs" data-v="' + esc(c.name) + '"><span class="nm">' + catIcon(c.name) + ' ' + esc(c.name) + '<span class="sub">' + detail + '</span></span>' + pill + '</button>';
+      const closedSubs = c.subs.filter((x) => x.closed).map((x) => x.name);
+      const pillF = c.closed ? '<span class="pill mut">cerrado</span>' : pill;
+      const extra = c.closed || closedSubs.length
+        ? '<button class="mini" data-a="reopen-cat" data-v="' + esc(c.name) + '">Reabrir' + (closedSubs.length && !c.closed ? ' ' + esc(closedSubs.join(', ')) : '') + '</button>'
+        : (pend.length ? '<button class="mini" data-a="close-item" data-v="' + esc(c.name) + '">No se pagará este periodo</button>' : '');
+      h += '<div class="fixed"><button class="nm" style="text-align:left;flex:1;min-height:44px" data-a="cat-movs" data-v="' + esc(c.name) + '">' + catIcon(c.name) + ' ' + esc(c.name) +
+        '<span class="sub">' + (c.closed ? money(c.spent) + ' pagado · lo que faltaba no se pagará' : detail) + '</span></button><span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">' + pillF + extra + '</span></div>';
     });
     if (!s.fixed.length) h += '<p class="note" style="padding:12px">Sin gastos fijos.</p>';
     h += '</div>';
@@ -847,14 +855,16 @@
     let h = '<div class="bud"><button style="width:100%;text-align:left;display:block" data-a="toggle-cat" data-v="' + esc(c.name) + '" aria-expanded="' + (open ? 'true' : 'false') + '">' +
       '<div class="h"><span class="name">' + catIcon(c.name) + ' ' + esc(c.name) + '</span><span class="nums">' + money(c.spent) + ' / ' + money(c.budget) + '</span></div>' +
       '<div class="bar"><div class="f ' + c.color + '" style="width:' + Math.max(0, width).toFixed(1) + '%"></div><div class="m" style="left:' + s.elapsedPct + '%"></div></div>' +
-      '<div class="foot"><span>' + (c.remaining >= 0 ? money(c.remaining) + ' restante' : money(-c.remaining) + ' pasado') + '</span><span class="p ' + c.color + '">' + (c.budget > 0 ? c.pct + ' %' : 'sin presupuesto') + '</span></div>';
+      '<div class="foot"><span>' + (c.closed ? 'Cerrada · presupuesto era ' + money(c.originalBudget) : c.remaining >= 0 ? money(c.remaining) + ' restante' : money(-c.remaining) + ' pasado') + '</span><span class="p ' + c.color + '">' + (c.budget > 0 || c.closed ? c.pct + ' %' : 'sin presupuesto') + '</span></div>';
     const subs = c.subs.filter((x) => x.name);
     if (subs.length) h += '<div class="subcats">' + subs.map((x) => esc(x.name) + ' ' + money(x.spent, { plain: true }) + (x.budget ? '/' + money(x.budget, { plain: true }) : '')).join(' · ') + '</div>';
     h += '</button>';
     if (open) {
       const list = c.entries.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
       h += '<div class="detail">' + list.slice(0, 6).map((e) => '<div class="li"><span>' + C.formatDateShort(e.date) + '</span><span>' + (e.treatment === 'refund' ? '↩︎ ' : '') + esc(e.description) + '</span>' + signedMoney(e) + '</div>').join('') +
-        '<button class="link" data-a="cat-movs" data-v="' + esc(c.name) + '">Ver ' + (list.length > 6 ? 'los ' + list.length : 'todos') + ' en Movimientos ›</button></div>';
+        '<button class="link" data-a="cat-movs" data-v="' + esc(c.name) + '">Ver ' + (list.length > 6 ? 'los ' + list.length : 'todos') + ' en Movimientos ›</button>' +
+        (c.closed ? '<button class="mini" data-a="reopen-cat" data-v="' + esc(c.name) + '">Reabrir categoría este periodo</button>'
+          : (c.originalBudget > c.spent ? '<button class="mini" data-a="close-item" data-v="' + esc(c.name) + '">Cerrar este periodo (no gastaré más aquí)</button>' : '')) + '</div>';
     }
     return h + '</div>';
   }
@@ -909,7 +919,7 @@
     });
     if (bad) { toast('Revisa los importes (ej. 150 o 150,00)'); return; }
     closeSheet();
-    mutate('Presupuesto guardado', () => { S.budgets[UI.periodId] = { cats }; S.categories = newMeta; });
+    mutate('Presupuesto guardado', () => { const prevClosed = S.budgets[UI.periodId] && S.budgets[UI.periodId].closed; S.budgets[UI.periodId] = { cats }; if (prevClosed) S.budgets[UI.periodId].closed = prevClosed; S.categories = newMeta; });
   }
 
   // ───────────────────────── Ajustes ─────────────────────────
@@ -1108,15 +1118,28 @@
     'rematch': () => mutate('Emparejamiento repetido', () => { const n = runMatching(); setTimeout(() => toast(n.auto + ' conciliados · ' + n.possible + ' posibles nuevos'), 50); }, { silent: true }),
     'toggle-cat': (v) => { UI.open[v] = !UI.open[v]; render(); },
     'budget-view': (v) => { UI.budgetView = v; render(); },
+    'close-item': (v) => {
+      const [cat, sub] = v.split('|');
+      mutate((sub ? cat + ' › ' + sub : cat) + ': no cuenta lo que faltaba', () => {
+        const id = UI.periodId; const info = budgetInfo(id);
+        if (!S.budgets[id]) S.budgets[id] = clone(info.budget || { cats: {} });
+        delete S.budgets[id].closedFrom;
+        S.budgets[id].closed = Object.assign({}, S.budgets[id].closed || {}, { [v]: true });
+      });
+    },
+    'reopen-cat': (v) => mutate(v + ' reabierta', () => {
+      const b = S.budgets[UI.periodId]; if (!b || !b.closed) return;
+      Object.keys(b.closed).forEach((k) => { if (k === v || k.startsWith(v + '|')) delete b.closed[k]; });
+    }),
     'hist-open': (v) => { UI.periodId = v; UI.budgetView = 'period'; render(); window.scrollTo(0, 0); },
     'hist-cat': (v) => { UI.histOpen[v] = !UI.histOpen[v]; render(); },
     'budget-edit': () => openBudgetEditor(),
     'budget-save': () => saveBudgetEditor(),
-    'budget-copy': () => { const info = budgetInfo(); if (!info.budget) return; mutate('Presupuesto guardado en este periodo', () => { S.budgets[UI.periodId] = clone(info.budget); }); },
+    'budget-copy': () => { const info = budgetInfo(); if (!info.budget) return; mutate('Presupuesto guardado en este periodo', () => { S.budgets[UI.periodId] = clone(info.budget); delete S.budgets[UI.periodId].closed; }); },
     'budget-copy-prev': () => {
       const prev = S.budgets[C.shiftPeriodId(UI.periodId, -1)]; if (!prev) return;
       if (S.budgets[UI.periodId] && !confirm('¿Reemplazar el presupuesto de este periodo por el del anterior?')) return;
-      mutate('Copiado del periodo anterior', () => { S.budgets[UI.periodId] = clone(prev); });
+      mutate('Copiado del periodo anterior', () => { S.budgets[UI.periodId] = clone(prev); delete S.budgets[UI.periodId].closed; });
     },
     'bed-more': (v, el) => { $('.opts', el.closest('.bed')).classList.toggle('hidden'); },
     'bed-type': (v, el) => { $$('.seg button', el.closest('.seg')).forEach((b) => b.classList.toggle('on', b === el)); },

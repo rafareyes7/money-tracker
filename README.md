@@ -70,6 +70,8 @@ No se guarda número de cuenta ni titular: las filas anteriores a la cabecera de
 - **Histórico:** *Presupuesto → Histórico*. Medias, gráfico de ingresos y gastos por periodo, lista de periodos (toca uno para abrirlo) y evolución por categoría.
 - **Visión compartida:** *Inicio → Hogar*. Sueldo y gastos de tu pareja escritos a mano, sumados con tus gastos previstos del periodo. La vista "Yo" no cambia.
 
+**v1.3 · Cerrar lo que no se pagará:** en *Por pagar* (Inicio y Presupuesto) cada pago tiene "No se pagará este periodo", y cada categoría variable tiene "Cerrar este periodo". Lo que faltaba deja de contar: el presupuesto efectivo pasa a ser lo gastado. Se guarda en `budgets[periodo].closed`, solo afecta a ese periodo y se puede reabrir.
+
 ## 6. Riesgos y cómo están resueltos
 
 | Riesgo | Solución |
