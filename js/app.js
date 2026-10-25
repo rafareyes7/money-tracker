@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.2.1';
+  const APP_VERSION = '1.2.2';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -51,7 +51,7 @@
     tab: 'home', sub: null, periodId: null,
     conc: { group: 'pending', q: '', limit: 80 },
     mov: { q: '', kind: 'expense', cat: '', type: '', status: '', source: '', sort: 'date', limit: 150 },
-    open: {}, draft: null, link: null, persisted: false, budgetView: 'period', histOpen: {}, homeView: 'me',
+    open: {}, draft: null, link: null, persisted: false, budgetView: 'period', histOpen: {}, homeView: 'me', back: null,
   };
   const L = { all: [], byPeriod: {}, known: [] };
 
@@ -196,7 +196,10 @@
     const pill = '<button class="period" data-a="period-sheet" aria-label="Cambiar periodo"><span class="dot' + (p.end < today() ? ' past' : '') + '"></span>' + esc(C.periodLabel(p)) + '</button>';
     const titles = { home: 'Inicio', movs: 'Movimientos', conc: 'Conciliar', budget: 'Presupuesto', settings: 'Ajustes' };
     let head;
-    if (UI.tab === 'conc' && UI.sub === 'import') head = '<button class="back" data-a="import-back">‹ Conciliar</button>' + pill;
+    const backBtn = UI.back ? '<button class="back" data-a="nav-back">‹ ' + esc(titles[UI.back.tab]) + '</button>' : '';
+    if (UI.back && UI.tab === 'movs') head = backBtn + pill;
+    else if (UI.back && UI.tab === 'conc' && UI.sub !== 'import') head = backBtn + '<button class="btn ghost sm" data-a="go-import">📥 Importar</button>';
+    else if (UI.tab === 'conc' && UI.sub === 'import') head = '<button class="back" data-a="import-back">‹ Conciliar</button>' + pill;
     else if (UI.tab === 'conc') head = '<h1>Conciliar</h1><button class="btn ghost sm" data-a="go-import">📥 Importar</button>';
     else if (UI.tab === 'settings') head = '<h1>Ajustes</h1>';
     else head = '<h1>' + titles[UI.tab] + '</h1>' + pill;
@@ -206,8 +209,9 @@
     $('#tabbar').innerHTML = TABS.map(([id, ic, label]) => '<button class="tab' + (UI.tab === id ? ' on' : '') + '" data-a="tab" data-v="' + id + '"' + (UI.tab === id ? ' aria-current="page"' : '') + '>' +
       '<span class="ic">' + ic + '</span>' + label + (id === 'conc' && pend ? '<span class="badge">' + pend + '</span>' : '') + '</button>').join('');
 
+    const pageTitle = UI.back && (UI.tab === 'movs' || (UI.tab === 'conc' && UI.sub !== 'import')) ? '<h1 style="font-size:28px;letter-spacing:-.02em;margin:0 0 10px">' + titles[UI.tab] + '</h1>' : '';
     const views = { home: renderHome, movs: renderMovs, conc: UI.sub === 'import' ? renderImport : renderConc, budget: renderBudget, settings: renderSettings };
-    $('#view').innerHTML = views[UI.tab]();
+    $('#view').innerHTML = pageTitle + views[UI.tab]();
     if (UI.tab === 'movs') renderMovList();
     if (UI.tab === 'conc' && UI.sub !== 'import') renderConcList();
   }
@@ -1013,11 +1017,28 @@
   }
 
   // ───────────────────────── Eventos ─────────────────────────
+  /** Ir a otra pestaña recordando de dónde vienes (para el botón ‹ Volver). */
+  function goWithBack(tab, setup) {
+    UI.back = { tab: UI.tab, sub: UI.sub, budgetView: UI.budgetView, homeView: UI.homeView, y: window.scrollY, mov: clone(UI.mov), conc: clone(UI.conc), open: clone(UI.open) };
+    if (setup) setup();
+    UI.tab = tab; render(); window.scrollTo(0, 0);
+    try { history.pushState({ back: true }, ''); } catch (e) { /* sin historial */ }
+  }
+  function goBack() {
+    const b = UI.back; if (!b) return;
+    UI.back = null; closeSheet();
+    Object.assign(UI, { tab: b.tab, sub: b.sub, budgetView: b.budgetView, homeView: b.homeView, mov: b.mov, conc: b.conc, open: b.open });
+    render(); requestAnimationFrame(() => window.scrollTo(0, b.y));
+  }
+  try { history.scrollRestoration = 'manual'; } catch (e) { /* no soportado */ }
+  window.addEventListener('popstate', () => { if (UI.back) goBack(); });
+
   const A = {
-    'tab': (v) => { UI.tab = v; if (v !== 'conc') UI.sub = null; render(); window.scrollTo(0, 0); },
+    'tab': (v) => { UI.back = null; UI.tab = v; if (v !== 'conc') UI.sub = null; render(); window.scrollTo(0, 0); },
+    'nav-back': () => { if (history.state && history.state.back) history.back(); else goBack(); },
     'go-import': () => { UI.tab = 'conc'; UI.sub = 'import'; render(); window.scrollTo(0, 0); },
     'import-back': () => { UI.sub = null; render(); },
-    'go-pending': () => { UI.tab = 'conc'; UI.sub = null; UI.conc.group = 'pending'; render(); window.scrollTo(0, 0); },
+    'go-pending': () => goWithBack('conc', () => { UI.sub = null; UI.conc.group = 'pending'; }),
     'toast-undo': () => { const f = toast.undo; $('#toast-root').innerHTML = ''; if (f) f(); },
     'sheet-close': () => closeSheet(),
     'period-sheet': () => openPeriodSheet(),
@@ -1030,7 +1051,7 @@
     'ov-reset': () => { closeSheet(); mutate('Periodo automático', () => { delete S.settings.overrides[UI.periodId]; }); },
     'mov-kind': (v) => { UI.mov.kind = v; UI.mov.limit = 150; render(); },
     'mov-more': () => { UI.mov.limit += 200; renderMovList(); },
-    'cat-movs': (v) => { UI.tab = 'movs'; UI.mov = Object.assign(UI.mov, { cat: v, kind: 'all', q: '', status: '', type: '', source: '' }); render(); window.scrollTo(0, 0); },
+    'cat-movs': (v) => { closeSheet(); goWithBack('movs', () => { UI.mov = Object.assign({}, UI.mov, { cat: v, kind: 'all', q: '', status: '', type: '', source: '', limit: 150 }); }); },
     'conc-group': (v) => { UI.conc.group = v; UI.conc.limit = 80; render(); },
     'conc-more': () => { UI.conc.limit += 100; renderConcList(); },
     'confirm-match': (v) => mutate('Confirmado', () => { const m = S.matches[v]; m.status = 'confirmed'; learnFromMatch(m); }),
