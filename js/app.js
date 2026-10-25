@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.3.0';
+  const APP_VERSION = '1.3.1';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -953,7 +953,8 @@
       '<label class="li2" style="position:relative"><span class="l">Restaurar copia</span><span class="chev">›</span><input type="file" accept=".json,application/json" data-c="restore" style="position:absolute;inset:0;opacity:0"></label>' +
       '<button class="li2 danger" data-a="clear-all"><span class="l">Borrar todos los datos</span></button></div>';
     h += '<p class="note">🔒 Todo se guarda solo en este iPhone (IndexedDB). La app no se conecta a internet. No se guardan número de cuenta ni titular.' +
-      (UI.persisted ? ' Almacenamiento protegido ✓.' : '') + ' · v' + APP_VERSION + ' · <a href="tests.html" style="color:var(--accent)">tests</a></p>';
+      (UI.persisted ? ' Almacenamiento protegido ✓.' : '') + ' · v' + APP_VERSION + ' · <a href="tests.html" style="color:var(--accent)">tests</a></p>' +
+      '<button class="btn plain" style="margin-top:12px" data-a="check-update">🔄 Buscar actualización</button>';
     return h;
   }
   function ruleTarget(r) {
@@ -1118,6 +1119,22 @@
     'rematch': () => mutate('Emparejamiento repetido', () => { const n = runMatching(); setTimeout(() => toast(n.auto + ' conciliados · ' + n.possible + ' posibles nuevos'), 50); }, { silent: true }),
     'toggle-cat': (v) => { UI.open[v] = !UI.open[v]; render(); },
     'budget-view': (v) => { UI.budgetView = v; render(); },
+    'check-update': async () => {
+      if (!navigator.onLine) { toast('Sin conexión. Conéctate para buscar la versión nueva.'); return; }
+      toast('Buscando versión nueva…');
+      try {
+        const reg = UI.swReg || (navigator.serviceWorker && await navigator.serviceWorker.getRegistration());
+        if (reg) await reg.update();
+        const res = await fetch('js/app.js?ts=' + Date.now(), { cache: 'no-store' });
+        const m = (await res.text()).match(/APP_VERSION = '([^']+)'/);
+        if (m && m[1] !== APP_VERSION) {
+          toast('Instalando v' + m[1] + '…');
+          if (reg && reg.waiting) reg.waiting.postMessage('skip');
+          setTimeout(() => location.reload(), 2500);
+        } else if (m) toast('Ya tienes la última versión (v' + APP_VERSION + ').');
+        else toast('No se pudo comprobar. ¿Está activo GitHub Pages?');
+      } catch (e) { toast('No se pudo comprobar: ' + e.message); }
+    },
     'close-item': (v) => {
       const [cat, sub] = v.split('|');
       mutate((sub ? cat + ' › ' + sub : cat) + ': no cuenta lo que faltaba', () => {
@@ -1279,11 +1296,16 @@
       $('#view').innerHTML = '<div class="empty"><div class="big-ic">⚠️</div><h2>No se pudo abrir el almacenamiento</h2><p>' + esc(e.message) + '. Si usas navegación privada, ábrela en modo normal.</p></div>';
     }
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-      navigator.serviceWorker.register('service-worker.js').then((reg) => {
-        reg.addEventListener('updatefound', () => {
-          const nw = reg.installing;
-          if (nw) nw.addEventListener('statechange', () => { if (nw.state === 'installed' && navigator.serviceWorker.controller) toast('Nueva versión lista. Cierra y abre la app para usarla.'); });
-        });
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+      // Cuando se activa una versión nueva, recarga sola (una vez) para usarla.
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || reloaded || $('#sheet-root').innerHTML) return;
+        reloaded = true; location.reload();
+      });
+      navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' }).then((reg) => {
+        UI.swReg = reg;
+        reg.update().catch(() => {});
       }).catch(() => { /* sin service worker: la app funciona igual con conexión */ });
     }
   }

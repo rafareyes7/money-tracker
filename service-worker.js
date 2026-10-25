@@ -1,6 +1,6 @@
 /* service-worker.js — Cache-first: tras la primera visita la app funciona sin conexión.
    Al publicar una versión nueva, cambia CACHE para que se descargue de nuevo. */
-const CACHE = 'conciliador-v1.3.0';
+const CACHE = 'conciliador-v1.3.1';
 const ASSETS = [
   './',
   'index.html',
@@ -19,8 +19,11 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  // cache: 'reload' evita copiar archivos viejos de la caché HTTP (GitHub Pages guarda 10 min).
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
+
+self.addEventListener('message', (e) => { if (e.data === 'skip') self.skipWaiting(); });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
