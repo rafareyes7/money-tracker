@@ -72,6 +72,8 @@ No se guarda número de cuenta ni titular: las filas anteriores a la cabecera de
 
 **v1.3 · Cerrar lo que no se pagará:** en *Por pagar* (Inicio y Presupuesto) cada pago tiene "No se pagará este periodo", y cada categoría variable tiene "Cerrar este periodo". Lo que faltaba deja de contar: el presupuesto efectivo pasa a ser lo gastado. Se guarda en `budgets[periodo].closed`, solo afecta a ese periodo y se puede reabrir.
 
+**v1.4 · Ahorros:** *Inicio → Ahorros*. Aportaciones (+), préstamos de tus ahorros (con casilla ☐/✓ al devolverlos) y retiradas. Muestra disponible, prestado pendiente y total. Se guarda en `kv.savings`.
+
 ## 6. Riesgos y cómo están resueltos
 
 | Riesgo | Solución |

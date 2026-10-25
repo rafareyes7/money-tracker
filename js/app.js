@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.3.2';
+  const APP_VERSION = '1.4.1';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -46,7 +46,7 @@
   };
 
   // ───────────────────────── Estado ─────────────────────────
-  const S = { settings: null, categories: null, budgets: null, rules: null, decisions: null, rejected: null, partner: null, movements: {}, matches: {} };
+  const S = { settings: null, categories: null, budgets: null, rules: null, decisions: null, rejected: null, partner: null, savings: null, movements: {}, matches: {} };
   const UI = {
     tab: 'home', sub: null, periodId: null,
     conc: { group: 'pending', q: '', limit: 80 },
@@ -131,6 +131,7 @@
     S.decisions = kv.decisions || {};
     S.rejected = kv.rejected || {};
     S.partner = kv.partner || { name: 'Pareja', periods: {} };
+    S.savings = kv.savings || { entries: [] };
     S.movements = {}; movements.forEach((m) => { S.movements[m.id] = m; });
     // Movimientos importados antes de v1.3.2: sacar el mensaje de los Bizum de la descripción.
     const fixed = movements.filter((m) => m.source === 'bank' && !m.comment && C.bizumMessage(m.description));
@@ -138,6 +139,13 @@
     if (fixed.length) await DB.putMany('movements', fixed);
     S.matches = {}; matches.forEach((m) => { S.matches[m.id] = m; });
     if (!kv.settings) await Promise.all([DB.setKV('settings', S.settings), DB.setKV('categories', S.categories), DB.setKV('rules', S.rules)]);
+    if (!S.settings.migratedVariables141) {
+      const changed = ['Groceries', 'Eating out', 'HouseHold'].filter((c) => S.categories[c] && S.categories[c].type === 'fixed');
+      changed.forEach((c) => { S.categories[c].type = 'variable'; });
+      S.settings.migratedVariables141 = true;
+      await Promise.all([DB.setKV('settings', S.settings), DB.setKV('categories', S.categories)]);
+      if (changed.length) setTimeout(() => toast(changed.join(', ') + ' ahora son Variable'), 800);
+    }
   }
   function markChanged() { S.settings.dataChangedAt = Date.now(); }
   async function persistCore() {
@@ -145,10 +153,10 @@
     await Promise.all([
       DB.replaceAll('matches', Object.values(S.matches)), DB.setKV('decisions', S.decisions), DB.setKV('rejected', S.rejected),
       DB.setKV('rules', S.rules), DB.setKV('settings', S.settings), DB.setKV('categories', S.categories), DB.setKV('budgets', S.budgets),
-      DB.setKV('partner', S.partner),
+      DB.setKV('partner', S.partner), DB.setKV('savings', S.savings),
     ]);
   }
-  const snapshot = () => JSON.stringify({ matches: S.matches, decisions: S.decisions, rejected: S.rejected, rules: S.rules, budgets: S.budgets, categories: S.categories, partner: S.partner });
+  const snapshot = () => JSON.stringify({ matches: S.matches, decisions: S.decisions, rejected: S.rejected, rules: S.rules, budgets: S.budgets, categories: S.categories, partner: S.partner, savings: S.savings });
 
   /** Cambia el estado, guarda, recalcula, pinta y ofrece “Deshacer”. */
   async function mutate(label, fn, opts) {
@@ -241,9 +249,10 @@
         '<button class="btn" data-a="go-import">📥 Importar archivos</button>' +
         '<button class="btn plain" style="margin-top:8px" data-a="v2-sheet">Importar presupuesto de la v2</button></div>' + installHint();
     }
-    const seg = '<div class="seg" style="margin-top:0">' + [['me', 'Yo'], ['home', 'Hogar (compartido)']].map(([v, l]) =>
+    const seg = '<div class="seg" style="margin-top:0">' + [['me', 'Yo'], ['home', 'Hogar'], ['savings', 'Ahorros']].map(([v, l]) =>
       '<button class="' + (UI.homeView === v ? 'on' : '') + '" data-a="home-view" data-v="' + v + '">' + l + '</button>').join('') + '</div>';
     if (UI.homeView === 'home') return seg + renderHousehold();
+    if (UI.homeView === 'savings') return seg + renderSavings();
     const s = summary(); const p = period(); const info = budgetInfo();
     const pend = pendingCount();
     let h = seg + backupBanner();
@@ -304,6 +313,65 @@
       (b ? '<p class="note">Último dato: ' + money(b.cents) + ' del ' + C.formatDate(b.date) + ' (' + (b.source === 'banco' ? 'archivo del banco' : 'escrito a mano') + ').</p><button class="btn plain" style="margin-top:12px" data-a="balance-clear">Quitar saldo</button>' : ''),
     '<button class="btn" data-a="balance-save">Guardar</button>');
   }
+  // ───────────────────────── Ahorros ─────────────────────────
+  const SAV_LABEL = { deposit: 'Aportación', loan: 'Préstamo', withdrawal: 'Retirada' };
+  function renderSavings() {
+    const E = S.savings.entries; const sv = C.savingsSummary(E);
+    if (!E.length) {
+      return '<div class="empty"><div class="big-ic">🐷</div><h2>Tus ahorros</h2><p>Apunta lo que vas ahorrando. Si tomas algo prestado de tus ahorros, apúntalo como préstamo y márcalo cuando lo devuelvas.</p>' +
+        '<button class="btn" data-a="sav-new" data-v="deposit">+ Primera aportación</button></div>';
+    }
+    const pct = sv.total > 0 ? Math.max(0, Math.min(100, Math.round((sv.available / sv.total) * 100))) : 0;
+    let h = '<div class="hero"><div class="lbl">Ahorros disponibles</div><div class="big' + (sv.available < 0 ? ' neg' : '') + '">' + money(sv.available) + '</div>' +
+      '<div class="bar-stack" aria-hidden="true"><i style="width:' + pct + '%;background:var(--seg-save)"></i><i style="width:' + (100 - pct) + '%;background:var(--seg-due)"></i></div>' +
+      '<div class="legend"><span style="--c:var(--seg-save)"><em>Disponible</em><b>' + money(sv.available) + '</b></span><span style="--c:var(--seg-due)"><em>Prestado</em><b>' + money(sv.lent) + '</b></span></div>' +
+      '<div class="sub" style="margin-top:8px">Total ahorrado ' + money(sv.total) + (sv.lent ? ' (incluye ' + money(sv.lent) + ' prestados)' : '') + '</div></div>';
+    h += '<div class="btn-row" style="margin:0 0 12px"><button class="btn sm" data-a="sav-new" data-v="deposit">+ Añadir</button><button class="btn ghost sm" data-a="sav-new" data-v="loan">↗ Préstamo</button><button class="btn plain sm" data-a="sav-new" data-v="withdrawal">− Retirar</button></div>';
+    if (sv.pendingLoans.length) {
+      h += '<div class="card"><div class="row-between"><h3>↗ Prestado pendiente</h3><span class="amt">' + money(sv.lent) + '</span></div><div style="margin-top:4px">' +
+        sv.pendingLoans.map((e) => loanRow(e)).join('') + '</div><p class="note" style="margin:6px 0 0">Marca la casilla cuando lo devuelvas.</p></div>';
+    }
+    h += '<div class="sec-h"><b>Movimientos</b><span>' + E.length + '</span></div><div class="list">';
+    E.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.createdAt || 0) < (b.createdAt || 0) ? 1 : -1)).forEach((e) => {
+      const sign = e.type === 'deposit' ? '+' : '−';
+      const col = e.type === 'deposit' ? 'var(--ok)' : e.type === 'loan' && e.repaidAt ? 'var(--muted)' : 'var(--text)';
+      const src = e.from && S.savings.entries.find((x) => x.id === e.from);
+      const state = e.type === 'loan' ? (e.repaidAt ? '<span class="pill ok">✓ devuelto ' + C.formatDateShort(e.repaidAt) + '</span>' : '<span class="pill warn">pendiente</span>') : '';
+      h += '<button class="tx" data-a="sav-edit" data-v="' + esc(e.id) + '"><span class="ico">' + (e.type === 'deposit' ? '🐷' : e.type === 'loan' ? '↗' : '➖') + '</span>' +
+        '<span class="m"><span class="t" style="display:block">' + esc(e.name || SAV_LABEL[e.type]) + '</span><span class="c" style="white-space:normal;flex-wrap:wrap">' + C.formatDate(e.date) + ' · ' + SAV_LABEL[e.type] + (src ? ' de “' + esc(src.name) + '”' : '') + ' ' + state + '</span>' +
+        (e.comment ? '<span class="c" style="display:block;white-space:normal">💬 ' + esc(e.comment) + '</span>' : '') + '</span>' +
+        '<span class="amt" style="color:' + col + (e.type === 'loan' && e.repaidAt ? ';text-decoration:line-through' : '') + '">' + sign + money(e.cents) + '</span></button>';
+    });
+    h += '</div><p class="note">Solo se guarda en este iPhone. No se mezcla con tu presupuesto ni con la conciliación.</p>';
+    return h;
+  }
+  function loanRow(e) {
+    const src = e.from && S.savings.entries.find((x) => x.id === e.from);
+    return '<div class="due"><button class="ck' + (e.repaidAt ? ' on' : '') + '" style="width:30px;height:30px;min-width:30px" data-a="sav-repay" data-v="' + esc(e.id) + '" aria-label="Marcar como devuelto">' + (e.repaidAt ? '✓' : '') + '</button>' +
+      '<div class="n">' + esc(e.name || 'Préstamo') + '<div class="sub">' + C.formatDate(e.date) + (src ? ' · de “' + esc(src.name) + '”' : '') + (e.comment ? ' · ' + esc(e.comment) : '') + '</div></div><span class="amt">' + money(e.cents) + '</span></div>';
+  }
+  function openSavingsForm(type, id) {
+    const e = id ? S.savings.entries.find((x) => x.id === id) : { type, name: '', cents: 0, date: today(), comment: '', from: '' };
+    if (!e) return;
+    UI.savType = e.type;
+    const deposits = S.savings.entries.filter((x) => x.type === 'deposit');
+    const ph = { deposit: 'Ej. Inicio de ahorros', loan: 'Ej. Para el alquiler', withdrawal: 'Ej. Vacaciones' };
+    const body = '<div class="seg" id="sav-type" style="grid-template-columns:repeat(3,1fr)">' + ['deposit', 'loan', 'withdrawal'].map((t) => '<button class="' + (e.type === t ? 'on' : '') + '" data-a="sav-type" data-v="' + t + '">' + { deposit: '+ Aportación', loan: '↗ Préstamo', withdrawal: '− Retirada' }[t] + '</button>').join('') + '</div>' +
+      '<p class="sub" id="sav-help">' + savHelp(e.type) + '</p>' +
+      '<label class="field"><span>Nombre</span><input class="input" id="sav-name" value="' + esc(e.name) + '" placeholder="' + ph[e.type] + '" autocomplete="off"></label>' +
+      '<label class="field"><span>Importe</span><input class="input" id="sav-amount" inputmode="decimal" value="' + (e.cents ? money(e.cents, { plain: true }) : '') + '" placeholder="0,00"></label>' +
+      '<label class="field"><span>Fecha</span><input class="input" type="date" id="sav-date" value="' + esc(e.date) + '"></label>' +
+      '<label class="field"><span>Comentario</span><input class="input" id="sav-comment" value="' + esc(e.comment || '') + '" placeholder="Ej. primeros ahorros en N26" autocomplete="off"></label>' +
+      '<label class="field' + (e.type === 'loan' && deposits.length ? '' : ' hidden') + '" id="sav-from-wrap"><span>¿De qué ahorro? (opcional)</span><select class="select" id="sav-from"><option value="">—</option>' +
+      deposits.map((d) => '<option value="' + esc(d.id) + '"' + (d.id === e.from ? ' selected' : '') + '>' + esc((d.name || 'Aportación') + ' · ' + money(d.cents)) + '</option>').join('') + '</select></label>' +
+      (id && e.type === 'loan' ? '<label class="check" style="margin-top:10px"><input type="checkbox" id="sav-repaid"' + (e.repaidAt ? ' checked' : '') + '> Ya lo he devuelto</label>' : '') +
+      (id ? '<button class="btn danger" style="margin-top:14px" data-a="sav-del" data-v="' + esc(id) + '">Borrar</button>' : '');
+    openSheet(id ? 'Editar ahorro' : 'Nuevo apunte de ahorro', body, '<button class="btn" data-a="sav-save" data-v="' + esc(id || '') + '">Guardar</button>');
+  }
+  function savHelp(t) {
+    return { deposit: 'Dinero que añades a tus ahorros.', loan: 'Dinero que tomas de tus ahorros y piensas devolver. Resta de lo disponible hasta que lo marques como devuelto.', withdrawal: 'Dinero que sacas para siempre (no se devuelve).' }[t];
+  }
+
   // ───────────────────────── Hogar (visión compartida) ─────────────────────────
   function partnerInfo(id) {
     id = id || UI.periodId;
@@ -1016,7 +1084,7 @@
   async function doBackup() {
     const data = {
       app: 'conciliador', version: 1, exportedAt: new Date().toISOString(),
-      kv: { settings: S.settings, categories: S.categories, budgets: S.budgets, rules: S.rules, decisions: S.decisions, rejected: S.rejected, partner: S.partner },
+      kv: { settings: S.settings, categories: S.categories, budgets: S.budgets, rules: S.rules, decisions: S.decisions, rejected: S.rejected, partner: S.partner, savings: S.savings },
       movements: Object.values(S.movements), matches: Object.values(S.matches),
     };
     const ok = await downloadFile('copia-conciliador-' + today() + '.json', JSON.stringify(data), 'application/json');
@@ -1189,6 +1257,38 @@
     },
     'v2-sheet': () => openV2Sheet(),
     'home-view': (v) => { UI.homeView = v; render(); },
+    'sav-new': (v) => openSavingsForm(v),
+    'sav-edit': (v) => openSavingsForm(null, v),
+    'sav-type': (v) => {
+      UI.savType = v; $$('#sav-type button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
+      $('#sav-help').textContent = savHelp(v);
+      $('#sav-from-wrap').classList.toggle('hidden', v !== 'loan' || !S.savings.entries.some((x) => x.type === 'deposit'));
+    },
+    'sav-save': (v) => {
+      const cents = C.parseAmount($('#sav-amount').value);
+      if (!Number.isFinite(cents) || cents <= 0) { toast('Escribe un importe mayor que 0'); return; }
+      const date = $('#sav-date').value;
+      if (!C.isValidISO(date)) { toast('Elige una fecha'); return; }
+      const type = UI.savType;
+      const data = { type, cents: Math.abs(cents), date, name: $('#sav-name').value.trim(), comment: $('#sav-comment').value.trim(), from: type === 'loan' ? ($('#sav-from') ? $('#sav-from').value : '') : '' };
+      const rp = $('#sav-repaid');
+      closeSheet();
+      mutate(v ? 'Guardado' : SAV_LABEL[type] + ' añadida' + (type === 'deposit' ? '' : ''), () => {
+        if (v) {
+          const e = S.savings.entries.find((x) => x.id === v); if (!e) return;
+          Object.assign(e, data);
+          if (type !== 'loan') delete e.repaidAt; else if (rp) e.repaidAt = rp.checked ? (e.repaidAt || today()) : null;
+        } else S.savings.entries.push(Object.assign({ id: 's_' + C.hashId(String(Date.now()) + Math.random()), createdAt: Date.now() }, data));
+      });
+    },
+    'sav-repay': (v) => {
+      const e = S.savings.entries.find((x) => x.id === v); if (!e) return;
+      mutate(e.repaidAt ? 'Préstamo marcado como pendiente' : 'Préstamo devuelto: ' + money(e.cents) + ' vuelven a tus ahorros', () => { e.repaidAt = e.repaidAt ? null : today(); });
+    },
+    'sav-del': (v) => {
+      if (!confirm('¿Borrar este apunte de ahorro?')) return;
+      closeSheet(); mutate('Apunte borrado', () => { S.savings.entries = S.savings.entries.filter((x) => x.id !== v); S.savings.entries.forEach((x) => { if (x.from === v) x.from = ''; }); });
+    },
     'partner-edit': () => openPartnerEditor(),
     'partner-save': () => savePartnerEditor(),
     'partner-copy': () => { const pi = partnerInfo(); if (!pi.data) return; mutate('Guardado en este periodo', () => { S.partner.periods[UI.periodId] = clone(pi.data); }); },

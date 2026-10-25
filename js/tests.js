@@ -241,6 +241,17 @@
     eq(C.bizumMessage('Bizum enviado a ANA PEREZ Sin concepto'), '');
     eq(C.bizumMessage('Pago en LIDL'), '');
   });
+  test('Ahorros: aportaciones, préstamo pendiente y devuelto', () => {
+    const E = [
+      { id: 'a', type: 'deposit', cents: 50000, date: '2026-10-25', name: 'Inicio de ahorros' },
+      { id: 'b', type: 'loan', cents: 10000, date: '2026-10-26', from: 'a' },
+      { id: 'c', type: 'withdrawal', cents: 5000, date: '2026-10-27' },
+    ];
+    let s = C.savingsSummary(E);
+    eq([s.total, s.lent, s.available], [45000, 10000, 35000]); eq(s.bySource.a.lent, 10000);
+    E[1].repaidAt = '2026-11-02'; s = C.savingsSummary(E);
+    eq([s.lent, s.available, s.repaid], [0, 45000, 10000]);
+  });
   test('Día de pago deducido del historial', () => {
     const d = C.inferDueDays([{ category: 'Rent', treatment: 'expense', date: '2026-10-01' }, { category: 'House Services', subcategory: 'agua', treatment: 'expense', date: '2026-10-05' }], ['Rent', 'House Services']);
     eq(d.Rent, 1); eq(d['House Services|agua'], 5);

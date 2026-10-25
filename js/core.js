@@ -850,6 +850,26 @@
     return { income, expenses, balance, cats, mePctIncome: pct(income.me, income.total), mePctExpenses: pct(expenses.me, expenses.total), projected: !finished };
   }
 
+  /**
+   * Ahorros: entries = [{ id, type: 'deposit'|'withdrawal'|'loan', cents, date, name, comment, from, repaidAt }].
+   * Disponible = aportado − retirado − prestado pendiente. Total = aportado − retirado (lo que tendrías si te devuelven todo).
+   */
+  function savingsSummary(entries) {
+    let deposits = 0, withdrawals = 0, lent = 0, repaid = 0;
+    const bySource = {};
+    (entries || []).forEach((e) => {
+      const c = Math.abs(e.cents || 0);
+      if (e.type === 'deposit') deposits += c;
+      else if (e.type === 'withdrawal') withdrawals += c;
+      else if (e.type === 'loan') {
+        if (e.repaidAt) repaid += c; else lent += c;
+        if (e.from) { const b = bySource[e.from] || (bySource[e.from] = { lent: 0, repaid: 0 }); if (e.repaidAt) b.repaid += c; else b.lent += c; }
+      }
+    });
+    const pendingLoans = (entries || []).filter((e) => e.type === 'loan' && !e.repaidAt).sort((a, b) => (a.date < b.date ? -1 : 1));
+    return { deposits, withdrawals, lent, repaid, total: deposits - withdrawals, available: deposits - withdrawals - lent, pendingLoans, bySource };
+  }
+
   // ───────────────────────── Exportación ─────────────────────────
 
   const TOSHL_HEADER = ['Fecha', 'Cuenta', 'Categoría', 'Etiquetas', 'Cantidad de gasto', 'Cantidad de ingreso', 'Divisa', 'En la divisa principal', 'Divisa principal', 'Descripción'];
@@ -905,7 +925,7 @@
     matchMovements, pairKey, matchId,
     DEFAULT_RULES, suggestForBank, learnRule,
     buildLedger, isPending,
-    colorFor, matchSubNames, inferDueDays, summarize, projectBalance, buildHistory, householdSummary,
+    colorFor, matchSubNames, inferDueDays, summarize, projectBalance, buildHistory, householdSummary, savingsSummary,
     TOSHL_HEADER, toToshlCSV, toLedgerJSON, fromV2Profiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;
