@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.4.1';
+  const APP_VERSION = '1.5.0';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -51,7 +51,7 @@
     tab: 'home', sub: null, periodId: null,
     conc: { group: 'pending', q: '', limit: 80 },
     mov: { q: '', kind: 'expense', cat: '', type: '', status: '', source: '', sort: 'date', limit: 150 },
-    open: {}, draft: null, link: null, persisted: false, budgetView: 'period', histOpen: {}, homeView: 'me', back: null,
+    open: {}, draft: null, link: null, persisted: false, budgetView: 'period', histOpen: {}, homeView: 'me', back: null, savUnlocked: false, pinFails: 0, pinLockUntil: 0,
   };
   const L = { all: [], byPeriod: {}, known: [] };
 
@@ -132,6 +132,7 @@
     S.rejected = kv.rejected || {};
     S.partner = kv.partner || { name: 'Pareja', periods: {} };
     S.savings = kv.savings || { entries: [] };
+    S.savingsPin = kv.savingsPin || null;
     S.movements = {}; movements.forEach((m) => { S.movements[m.id] = m; });
     // Movimientos importados antes de v1.3.2: sacar el mensaje de los Bizum de la descripción.
     const fixed = movements.filter((m) => m.source === 'bank' && !m.comment && C.bizumMessage(m.description));
@@ -315,7 +316,36 @@
   }
   // ───────────────────────── Ahorros ─────────────────────────
   const SAV_LABEL = { deposit: 'Aportación', loan: 'Préstamo', withdrawal: 'Retirada' };
+  // ── PIN de Ahorros: nunca está en el código. Se crea en el dispositivo y se guarda como hash PBKDF2 con sal aleatoria.
+  const PIN_ITER = 150000;
+  const b64 = (u8) => btoa(String.fromCharCode(...u8));
+  async function pinHash(pin, saltB64, iter) {
+    const salt = Uint8Array.from(atob(saltB64), (c) => c.charCodeAt(0));
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: iter || PIN_ITER, hash: 'SHA-256' }, key, 256);
+    return b64(new Uint8Array(bits));
+  }
+  async function setPin(pin) {
+    const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
+    S.savingsPin = { salt, iter: PIN_ITER, hash: await pinHash(pin, salt, PIN_ITER) };
+    await DB.setKV('savingsPin', S.savingsPin);
+  }
+  async function checkPin(pin) { const p = S.savingsPin; return !!p && (await pinHash(pin, p.salt, p.iter)) === p.hash; }
+  function lockSavings() { if (UI.savUnlocked) { UI.savUnlocked = false; if (UI.tab === 'home' && UI.homeView === 'savings') render(); } }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) lockSavings(); });
+  function renderPinGate() {
+    const create = !S.savingsPin;
+    const wait = Math.ceil((UI.pinLockUntil - Date.now()) / 1000);
+    const inp = (id, ph) => '<input class="input" id="' + id + '" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="' + ph + '" style="text-align:center;font-size:28px;letter-spacing:12px;margin-top:10px" data-i="pin-in" data-v="' + (create ? 'create' : 'check') + '">';
+    return '<div class="empty" style="padding-top:20px"><div class="big-ic">🔒</div><h2>' + (create ? 'Crea un PIN para Ahorros' : 'Ahorros protegidos') + '</h2>' +
+      '<p>' + (create ? 'Elige 4 números. Solo se guarda en este iPhone y no aparece en el código.' : 'Introduce tu PIN de 4 números.') + '</p>' +
+      (wait > 0 ? '<p style="color:var(--bad)">Demasiados intentos. Espera ' + wait + ' s.</p>' :
+        inp('pin1', '••••') + (create ? inp('pin2', 'Repite') + '<button class="btn" style="margin-top:12px" data-a="pin-create">Guardar PIN</button>' : '')) +
+      '<p class="sub" id="pin-msg" style="margin-top:10px;min-height:20px"></p>' +
+      (create ? '' : '<button class="btn plain sm" style="margin-top:8px" data-a="pin-forgot">¿Olvidaste el PIN?</button>') + '</div>';
+  }
   function renderSavings() {
+    if (!UI.savUnlocked) return renderPinGate();
     const E = S.savings.entries; const sv = C.savingsSummary(E);
     if (!E.length) {
       return '<div class="empty"><div class="big-ic">🐷</div><h2>Tus ahorros</h2><p>Apunta lo que vas ahorrando. Si tomas algo prestado de tus ahorros, apúntalo como préstamo y márcalo cuando lo devuelvas.</p>' +
@@ -326,6 +356,13 @@
       '<div class="bar-stack" aria-hidden="true"><i style="width:' + pct + '%;background:var(--seg-save)"></i><i style="width:' + (100 - pct) + '%;background:var(--seg-due)"></i></div>' +
       '<div class="legend"><span style="--c:var(--seg-save)"><em>Disponible</em><b>' + money(sv.available) + '</b></span><span style="--c:var(--seg-due)"><em>Prestado</em><b>' + money(sv.lent) + '</b></span></div>' +
       '<div class="sub" style="margin-top:8px">Total ahorrado ' + money(sv.total) + (sv.lent ? ' (incluye ' + money(sv.lent) + ' prestados)' : '') + '</div></div>';
+    if (sv.accounts.length) {
+      const max = Math.max(1, ...sv.accounts.map((a) => Math.abs(a.total)));
+      h += '<div class="card"><div class="row-between"><h3>🏦 Dónde están</h3><button class="btn plain sm" data-a="sav-lock">🔒 Bloquear</button></div><div style="margin-top:6px">' + sv.accounts.map((a) =>
+        '<div style="padding:8px 0;border-top:1px solid var(--line)"><div class="row-between"><b>' + esc(a.name) + '</b><span class="amt">' + money(a.available) + '</span></div>' +
+        '<div class="bar-stack" style="margin:6px 0 2px;height:8px"><i style="width:' + (Math.max(0, a.available) / max * 100).toFixed(1) + '%;background:var(--seg-save)"></i><i style="width:' + (a.lent / max * 100).toFixed(1) + '%;background:var(--seg-due)"></i></div>' +
+        (a.lent ? '<div class="sub">prestado ' + money(a.lent) + ' · total ' + money(a.total) + '</div>' : '') + '</div>').join('') + '</div></div>';
+    }
     h += '<div class="btn-row" style="margin:0 0 12px"><button class="btn sm" data-a="sav-new" data-v="deposit">+ Añadir</button><button class="btn ghost sm" data-a="sav-new" data-v="loan">↗ Préstamo</button><button class="btn plain sm" data-a="sav-new" data-v="withdrawal">− Retirar</button></div>';
     if (sv.pendingLoans.length) {
       h += '<div class="card"><div class="row-between"><h3>↗ Prestado pendiente</h3><span class="amt">' + money(sv.lent) + '</span></div><div style="margin-top:4px">' +
@@ -338,7 +375,8 @@
       const src = e.from && S.savings.entries.find((x) => x.id === e.from);
       const state = e.type === 'loan' ? (e.repaidAt ? '<span class="pill ok">✓ devuelto ' + C.formatDateShort(e.repaidAt) + '</span>' : '<span class="pill warn">pendiente</span>') : '';
       h += '<button class="tx" data-a="sav-edit" data-v="' + esc(e.id) + '"><span class="ico">' + (e.type === 'deposit' ? '🐷' : e.type === 'loan' ? '↗' : '➖') + '</span>' +
-        '<span class="m"><span class="t" style="display:block">' + esc(e.name || SAV_LABEL[e.type]) + '</span><span class="c" style="white-space:normal;flex-wrap:wrap">' + C.formatDate(e.date) + ' · ' + SAV_LABEL[e.type] + (src ? ' de “' + esc(src.name) + '”' : '') + ' ' + state + '</span>' +
+        '<span class="m"><span class="t" style="display:block">' + esc(e.name || SAV_LABEL[e.type]) + '</span><span class="c" style="white-space:normal;flex-wrap:wrap">' + C.formatDate(e.date) + ' · ' + SAV_LABEL[e.type] + (src ? ' de “' + esc(src.name) + '”' : '') +
+        ((e.account || (src && src.account)) ? ' · 🏦 ' + esc(e.account || src.account) : '') + ' ' + state + '</span>' +
         (e.comment ? '<span class="c" style="display:block;white-space:normal">💬 ' + esc(e.comment) + '</span>' : '') + '</span>' +
         '<span class="amt" style="color:' + col + (e.type === 'loan' && e.repaidAt ? ';text-decoration:line-through' : '') + '">' + sign + money(e.cents) + '</span></button>';
     });
@@ -361,12 +399,20 @@
       '<label class="field"><span>Nombre</span><input class="input" id="sav-name" value="' + esc(e.name) + '" placeholder="' + ph[e.type] + '" autocomplete="off"></label>' +
       '<label class="field"><span>Importe</span><input class="input" id="sav-amount" inputmode="decimal" value="' + (e.cents ? money(e.cents, { plain: true }) : '') + '" placeholder="0,00"></label>' +
       '<label class="field"><span>Fecha</span><input class="input" type="date" id="sav-date" value="' + esc(e.date) + '"></label>' +
+      '<label class="field"><span>Cuenta (dónde está el dinero)</span><input class="input" id="sav-account" value="' + esc(e.account || '') + '" list="sav-accounts" placeholder="Ej. N26, ING, Efectivo" autocomplete="off"></label>' +
+      '<div class="chips">' + savAccounts().map((a) => '<button class="chip" data-a="sav-acc" data-v="' + esc(a) + '">' + esc(a) + '</button>').join('') + '</div>' +
+      '<datalist id="sav-accounts">' + savAccounts().map((a) => '<option value="' + esc(a) + '">').join('') + '</datalist>' +
       '<label class="field"><span>Comentario</span><input class="input" id="sav-comment" value="' + esc(e.comment || '') + '" placeholder="Ej. primeros ahorros en N26" autocomplete="off"></label>' +
       '<label class="field' + (e.type === 'loan' && deposits.length ? '' : ' hidden') + '" id="sav-from-wrap"><span>¿De qué ahorro? (opcional)</span><select class="select" id="sav-from"><option value="">—</option>' +
       deposits.map((d) => '<option value="' + esc(d.id) + '"' + (d.id === e.from ? ' selected' : '') + '>' + esc((d.name || 'Aportación') + ' · ' + money(d.cents)) + '</option>').join('') + '</select></label>' +
       (id && e.type === 'loan' ? '<label class="check" style="margin-top:10px"><input type="checkbox" id="sav-repaid"' + (e.repaidAt ? ' checked' : '') + '> Ya lo he devuelto</label>' : '') +
       (id ? '<button class="btn danger" style="margin-top:14px" data-a="sav-del" data-v="' + esc(id) + '">Borrar</button>' : '');
     openSheet(id ? 'Editar ahorro' : 'Nuevo apunte de ahorro', body, '<button class="btn" data-a="sav-save" data-v="' + esc(id || '') + '">Guardar</button>');
+  }
+  function savAccounts() {
+    const set = new Set(S.savings.entries.map((x) => x.account).filter(Boolean));
+    ['N26', 'ING', 'Efectivo'].forEach((a) => set.add(a));
+    return [...set];
   }
   function savHelp(t) {
     return { deposit: 'Dinero que añades a tus ahorros.', loan: 'Dinero que tomas de tus ahorros y piensas devolver. Resta de lo disponible hasta que lo marques como devuelto.', withdrawal: 'Dinero que sacas para siempre (no se devuelve).' }[t];
@@ -1009,6 +1055,7 @@
     const last = s.lastBackupAt ? C.formatDate(C.todayISO(new Date(s.lastBackupAt))) : 'nunca';
     let h = '<div class="set-h">Saldo del banco (opcional)</div><div class="list">' +
       '<button class="li2" data-a="balance-sheet"><span class="l">💶 Saldo actual</span><span class="r">' + (s.balance ? money(s.balance.cents) + ' · ' + C.formatDateShort(s.balance.date) : 'Añadir') + ' <span class="chev">›</span></span></button></div>';
+    if (S.savingsPin) h += '<div class="set-h">Ahorros</div><div class="list"><button class="li2" data-a="pin-change"><span class="l">🔒 Cambiar PIN de Ahorros</span><span class="chev">›</span></button></div>';
     h += '<div class="set-h">Periodo</div><div class="list">' +
       '<label class="li2"><span class="l">Día de inicio</span><input class="num-input" type="number" inputmode="numeric" min="1" max="28" value="' + s.startDay + '" data-c="set-startday"></label>' +
       '<label class="li2"><span class="l">Saltar sábados y domingos</span><input type="checkbox" class="switch" data-c="set-toggle" data-v="skipWeekends"' + (s.skipWeekends ? ' checked' : '') + '></label>' +
@@ -1084,7 +1131,7 @@
   async function doBackup() {
     const data = {
       app: 'conciliador', version: 1, exportedAt: new Date().toISOString(),
-      kv: { settings: S.settings, categories: S.categories, budgets: S.budgets, rules: S.rules, decisions: S.decisions, rejected: S.rejected, partner: S.partner, savings: S.savings },
+      kv: { settings: S.settings, categories: S.categories, budgets: S.budgets, rules: S.rules, decisions: S.decisions, rejected: S.rejected, partner: S.partner, savings: S.savings, savingsPin: S.savingsPin },
       movements: Object.values(S.movements), matches: Object.values(S.matches),
     };
     const ok = await downloadFile('copia-conciliador-' + today() + '.json', JSON.stringify(data), 'application/json');
@@ -1129,7 +1176,7 @@
   window.addEventListener('popstate', () => { if (UI.back) goBack(); });
 
   const A = {
-    'tab': (v) => { UI.back = null; UI.tab = v; if (v !== 'conc') UI.sub = null; render(); window.scrollTo(0, 0); },
+    'tab': (v) => { UI.back = null; UI.savUnlocked = false; UI.tab = v; if (v !== 'conc') UI.sub = null; render(); window.scrollTo(0, 0); },
     'nav-back': () => { if (history.state && history.state.back) history.back(); else goBack(); },
     'go-import': () => { UI.tab = 'conc'; UI.sub = 'import'; render(); window.scrollTo(0, 0); },
     'import-back': () => { UI.sub = null; render(); },
@@ -1256,8 +1303,30 @@
       $('#bed-newcat').closest('.row-between').before(tmp.firstChild); $('#bed-newcat').value = '';
     },
     'v2-sheet': () => openV2Sheet(),
-    'home-view': (v) => { UI.homeView = v; render(); },
+    'home-view': (v) => { if (v !== 'savings') UI.savUnlocked = false; UI.homeView = v; render(); },
     'sav-new': (v) => openSavingsForm(v),
+    'sav-acc': (v) => { $('#sav-account').value = v; },
+    'sav-lock': () => lockSavings(),
+    'pin-create': async () => {
+      const a = $('#pin1').value, b = $('#pin2').value;
+      if (!/^\d{4}$/.test(a)) { $('#pin-msg').textContent = 'El PIN debe tener 4 números.'; return; }
+      if (a !== b) { $('#pin-msg').textContent = 'Los dos PIN no coinciden.'; return; }
+      await setPin(a); UI.savUnlocked = true; render(); toast('PIN creado. Se pedirá cada vez que entres a Ahorros.');
+    },
+    'pin-forgot': async () => {
+      if (!confirm('Sin el PIN no se pueden ver los ahorros. Puedes restaurar una copia de seguridad (Ajustes) o BORRAR los ahorros y crear un PIN nuevo. ¿Borrar ahorros y PIN?')) return;
+      if (!confirm('Se borrarán todos los apuntes de ahorro de este iPhone. ¿Seguro?')) return;
+      S.savings = { entries: [] }; S.savingsPin = null;
+      await Promise.all([DB.setKV('savings', S.savings), DB.setKV('savingsPin', null)]); render(); toast('Ahorros y PIN borrados');
+    },
+    'pin-change': async () => {
+      const cur = prompt('PIN actual'); if (cur === null) return;
+      if (!(await checkPin(cur))) { toast('PIN incorrecto'); return; }
+      const n1 = prompt('Nuevo PIN (4 números)'); if (n1 === null) return;
+      if (!/^\d{4}$/.test(n1)) { toast('El PIN debe tener 4 números'); return; }
+      const n2 = prompt('Repite el nuevo PIN'); if (n1 !== n2) { toast('No coinciden'); return; }
+      await setPin(n1); toast('PIN cambiado');
+    },
     'sav-edit': (v) => openSavingsForm(null, v),
     'sav-type': (v) => {
       UI.savType = v; $$('#sav-type button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
@@ -1270,7 +1339,10 @@
       const date = $('#sav-date').value;
       if (!C.isValidISO(date)) { toast('Elige una fecha'); return; }
       const type = UI.savType;
-      const data = { type, cents: Math.abs(cents), date, name: $('#sav-name').value.trim(), comment: $('#sav-comment').value.trim(), from: type === 'loan' ? ($('#sav-from') ? $('#sav-from').value : '') : '' };
+      const from = type === 'loan' ? ($('#sav-from') ? $('#sav-from').value : '') : '';
+      let account = $('#sav-account').value.trim();
+      if (!account && from) { const src = S.savings.entries.find((x) => x.id === from); if (src) account = src.account || ''; }
+      const data = { type, cents: Math.abs(cents), date, name: $('#sav-name').value.trim(), comment: $('#sav-comment').value.trim(), from, account };
       const rp = $('#sav-repaid');
       closeSheet();
       mutate(v ? 'Guardado' : SAV_LABEL[type] + ' añadida' + (type === 'deposit' ? '' : ''), () => {
@@ -1372,6 +1444,15 @@
     },
   };
   const IN = {
+    'pin-in': async (v, el) => {
+      if (v !== 'check' || el.value.length < 4) return;
+      if (Date.now() < UI.pinLockUntil) return;
+      const ok = await checkPin(el.value);
+      if (ok) { UI.savUnlocked = true; UI.pinFails = 0; render(); return; }
+      UI.pinFails++; el.value = '';
+      if (UI.pinFails >= 5) { UI.pinLockUntil = Date.now() + 30000; UI.pinFails = 0; render(); setTimeout(render, 30500); return; }
+      $('#pin-msg').textContent = 'PIN incorrecto (' + UI.pinFails + '/5).';
+    },
     'mov-q': debounce((v, el) => { UI.mov.q = el.value; UI.mov.limit = 150; renderMovList(); }, 180),
     'conc-q': debounce((v, el) => { UI.conc.q = el.value; renderConcList(); }, 180),
     'link-q': debounce((v, el) => { UI.link.q = el.value; renderLink(); }, 150),

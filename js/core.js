@@ -856,9 +856,15 @@
    */
   function savingsSummary(entries) {
     let deposits = 0, withdrawals = 0, lent = 0, repaid = 0;
-    const bySource = {};
+    const bySource = {}, byAccount = {};
+    const byId = {}; (entries || []).forEach((e) => { byId[e.id] = e; });
+    const acc = (e) => (e.account || (e.from && byId[e.from] && byId[e.from].account) || 'Sin cuenta');
     (entries || []).forEach((e) => {
       const c = Math.abs(e.cents || 0);
+      const a = byAccount[acc(e)] || (byAccount[acc(e)] = { name: acc(e), total: 0, lent: 0, available: 0 });
+      if (e.type === 'deposit') a.total += c;
+      else if (e.type === 'withdrawal') a.total -= c;
+      else if (e.type === 'loan' && !e.repaidAt) a.lent += c;
       if (e.type === 'deposit') deposits += c;
       else if (e.type === 'withdrawal') withdrawals += c;
       else if (e.type === 'loan') {
@@ -867,7 +873,9 @@
       }
     });
     const pendingLoans = (entries || []).filter((e) => e.type === 'loan' && !e.repaidAt).sort((a, b) => (a.date < b.date ? -1 : 1));
-    return { deposits, withdrawals, lent, repaid, total: deposits - withdrawals, available: deposits - withdrawals - lent, pendingLoans, bySource };
+    const accounts = Object.values(byAccount).map((a) => Object.assign(a, { available: a.total - a.lent }))
+      .filter((a) => a.total || a.lent).sort((x, y) => y.available - x.available);
+    return { deposits, withdrawals, lent, repaid, total: deposits - withdrawals, available: deposits - withdrawals - lent, pendingLoans, bySource, accounts };
   }
 
   // ───────────────────────── Exportación ─────────────────────────

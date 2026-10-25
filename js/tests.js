@@ -252,6 +252,14 @@
     E[1].repaidAt = '2026-11-02'; s = C.savingsSummary(E);
     eq([s.lent, s.available, s.repaid], [0, 45000, 10000]);
   });
+  test('Ahorros repartidos por cuenta (el préstamo hereda la cuenta de su origen)', () => {
+    const s = C.savingsSummary([
+      { id: 'a', type: 'deposit', cents: 50000, account: 'N26' }, { id: 'b', type: 'deposit', cents: 20000, account: 'ING' },
+      { id: 'c', type: 'deposit', cents: 10000, account: 'Efectivo' }, { id: 'd', type: 'loan', cents: 10000, from: 'a' },
+      { id: 'e', type: 'withdrawal', cents: 5000, account: 'ING' }]);
+    eq(s.accounts.map((x) => [x.name, x.available, x.lent]), [['N26', 40000, 10000], ['ING', 15000, 0], ['Efectivo', 10000, 0]]);
+    eq(s.available, 65000);
+  });
   test('Día de pago deducido del historial', () => {
     const d = C.inferDueDays([{ category: 'Rent', treatment: 'expense', date: '2026-10-01' }, { category: 'House Services', subcategory: 'agua', treatment: 'expense', date: '2026-10-05' }], ['Rent', 'House Services']);
     eq(d.Rent, 1); eq(d['House Services|agua'], 5);

@@ -74,6 +74,8 @@ No se guarda número de cuenta ni titular: las filas anteriores a la cabecera de
 
 **v1.4 · Ahorros:** *Inicio → Ahorros*. Aportaciones (+), préstamos de tus ahorros (con casilla ☐/✓ al devolverlos) y retiradas. Muestra disponible, prestado pendiente y total. Se guarda en `kv.savings`.
 
+**v1.5 · Ahorros por cuenta y con PIN:** cada apunte tiene **Cuenta** (N26, ING, Efectivo…) y hay un reparto “Dónde están”. Ahorros pide un PIN de 4 números. **El PIN no está en el código:** se crea en el dispositivo la primera vez y se guarda como hash PBKDF2-SHA256 (150.000 iteraciones, sal aleatoria) en `kv.savingsPin`. Se bloquea al salir de Ahorros o al cerrar la app. 5 fallos → espera de 30 s. Es una protección visual: la copia de seguridad JSON contiene los ahorros sin cifrar.
+
 ## 6. Riesgos y cómo están resueltos
 
 | Riesgo | Solución |
