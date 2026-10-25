@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.2.2';
+  const APP_VERSION = '1.2.3';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -245,7 +245,7 @@
     if (!info.budget) {
       h += '<button class="banner info" data-a="budget-edit">📊 <span class="grow"><b>Define tu presupuesto</b> para ver cuánto te queda y qué falta por pagar.</span><span class="chev">›</span></button>';
       h += '<div class="tiles"><div class="tile"><small>Ingresos</small><b>' + money(s.income) + '</b></div><div class="tile"><small>Gastado</small><b>' + money(s.spentTotal) + '</b></div></div>';
-      return h + alertsCard(s);
+      return h + balanceCard(s, p) + alertsCard(s);
     }
     const avail = s.available;
     const base = Math.max(1, s.spentTotal + s.pendingTotal + Math.max(0, avail) + Math.max(0, s.margin));
@@ -277,8 +277,10 @@
   }
   function balanceCard(s, p) {
     const t = today();
-    if (t < p.start || t > p.end) return '';
     const b = S.settings.balance;
+    if (t < p.start || t > p.end) {
+      return '<button class="banner info" data-a="balance-sheet">💶 <span class="grow">Saldo del banco: ' + (b ? '<b>' + money(b.cents) + '</b> (' + C.formatDateShort(b.date) + ')' : 'sin poner') + '. El cálculo de cierre se ve en el periodo actual.</span><span class="chev">›</span></button>';
+    }
     if (!b) return '<button class="banner info" data-a="balance-sheet">💶 <span class="grow"><b>¿Con cuánto acabarás el periodo?</b> Añade tu saldo del banco (opcional).</span><span class="chev">›</span></button>';
     const pr = C.projectBalance(s, b.cents);
     const stale = b.date < p.start;
@@ -915,7 +917,9 @@
     const s = S.settings; const p = period();
     const ov = s.overrides && s.overrides[UI.periodId];
     const last = s.lastBackupAt ? C.formatDate(C.todayISO(new Date(s.lastBackupAt))) : 'nunca';
-    let h = '<div class="set-h">Periodo</div><div class="list">' +
+    let h = '<div class="set-h">Saldo del banco (opcional)</div><div class="list">' +
+      '<button class="li2" data-a="balance-sheet"><span class="l">💶 Saldo actual</span><span class="r">' + (s.balance ? money(s.balance.cents) + ' · ' + C.formatDateShort(s.balance.date) : 'Añadir') + ' <span class="chev">›</span></span></button></div>';
+    h += '<div class="set-h">Periodo</div><div class="list">' +
       '<label class="li2"><span class="l">Día de inicio</span><input class="num-input" type="number" inputmode="numeric" min="1" max="28" value="' + s.startDay + '" data-c="set-startday"></label>' +
       '<label class="li2"><span class="l">Saltar sábados y domingos</span><input type="checkbox" class="switch" data-c="set-toggle" data-v="skipWeekends"' + (s.skipWeekends ? ' checked' : '') + '></label>' +
       '<label class="li2"><span class="l">Saltar festivos</span><input type="checkbox" class="switch" data-c="set-toggle" data-v="skipHolidays"' + (s.skipHolidays ? ' checked' : '') + '></label>' +
@@ -927,7 +931,7 @@
       '<button class="li2" data-a="budget-edit"><span class="l">Presupuesto, tipo (fijo/variable) y día de pago</span><span class="r">' + budgetCats().length + ' <span class="chev">›</span></span></button>' +
       '<button class="li2" data-a="v2-sheet"><span class="l">Importar presupuesto de la v2 (JSON)</span><span class="chev">›</span></button>' +
       '<button class="li2" data-a="partner-edit"><span class="l">Visión compartida: sueldo y gastos de ' + esc(S.partner.name || 'tu pareja') + '</span><span class="chev">›</span></button>' +
-      '<button class="li2" data-a="balance-sheet"><span class="l">Saldo del banco (opcional)</span><span class="r">' + (S.settings.balance ? money(S.settings.balance.cents) : 'no') + ' <span class="chev">›</span></span></button></div>';
+      '</div>';
     const learned = S.rules.filter((r) => r.learned).length;
     h += '<div class="set-h">Reglas · ' + S.rules.length + '</div><div class="list">' +
       S.rules.slice(0, 5).map((r) => '<button class="li2 rule" data-a="rule-edit" data-v="' + esc(r.id) + '"><span class="l"><code>' + esc(r.pattern) + '</code> → ' + esc(ruleTarget(r)) + '</span><span class="chev">›</span></button>').join('') +
