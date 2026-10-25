@@ -78,6 +78,8 @@ No se guarda número de cuenta ni titular: las filas anteriores a la cabecera de
 
 **v1.6 · Explicar (sin IA):** ⓘ junto a las cifras (Te quedan, por día, Gastado, Por pagar, Ahorro, Saldo, Previsión, Al final del periodo, Ingresos y cada categoría) abre la fórmula con los números reales, el desglose y los movimientos más grandes. En cada movimiento, "🔎 De dónde sale" muestra origen (banco/Toshl), emparejamiento, clasificación y cómo cuenta. Se activa o desactiva en Ajustes → Explicaciones. Lo cerrado en un periodo se ve siempre con un botón "Deshacer" (Inicio y Presupuesto).
 
+**v1.7 · Presupuesto distinto por mes:** *Presupuesto → 📋 Duplicar a otro mes* copia el presupuesto al mes elegido y abre el editor de ese mes (total en vivo, diferencia con el mes anterior, “antes: X” por categoría y “Quitar de este mes”). Un mes sin presupuesto propio usa el último anterior que lo tenga.
+
 ## 6. Riesgos y cómo están resueltos
 
 | Riesgo | Solución |

@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.6.0';
+  const APP_VERSION = '1.7.0';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -919,6 +919,8 @@
       return '<div class="empty"><div class="big-ic">📊</div><h2>Aún no tienes presupuesto</h2><p>Pon un importe por categoría. Se copia al siguiente periodo con un toque.</p>' +
         '<button class="btn" data-a="budget-edit">Crear presupuesto</button><button class="btn plain" style="margin-top:8px" data-a="v2-sheet">Importar de la v2 (JSON)</button></div>';
     }
+    h += '<div class="row-between" style="margin:0 2px 10px"><span class="sub">Presupuesto de este periodo: <b>' + money(budgetTotalOf(info.budget)) + '</b>' + (info.from ? ' (heredado)' : '') + '</span></div>' +
+      '<div class="btn-row" style="margin:0 0 12px"><button class="btn ghost sm" data-a="budget-edit">✏️ Editar</button><button class="btn ghost sm" data-a="budget-dup">📋 Duplicar a otro mes</button></div>';
     if (info.from) h += '<button class="banner info" data-a="budget-copy">📋 <span class="grow">Usando el presupuesto de <b>' + esc(C.periodLabel(period(info.from))) + '</b>. Toca para guardarlo en este periodo.</span><span class="chev">›</span></button>';
     const t = (l, v, st) => '<div class="tile"><small>' + l + '</small><b' + (st ? ' style="' + st + '"' : '') + '>' + v + '</b></div>';
     h += '<div class="sumgrid">' + t('Ingresos ' + infoBtn('income'), money(s.income)) + t('Gastos ' + infoBtn('spent'), money(s.consumption)) + t('Ahorro / inversión', money(s.savings)) +
@@ -1035,8 +1037,12 @@
     return h + '</div>';
   }
 
+  function budgetTotalOf(b) { return Object.values((b && b.cats) || {}).reduce((a, c) => a + (c.cents || 0), 0); }
   function openBudgetEditor() {
     const info = budgetInfo(); const b = clone((info.budget && info.budget.cats) || {});
+    const prevId = C.shiftPeriodId(UI.periodId, -1);
+    const prev = (budgetInfo(prevId).budget || { cats: {} }).cats || {};
+    UI.bedPrevTotal = budgetTotalOf(budgetInfo(prevId).budget); UI.bedPrevLabel = C.periodLabel(period(prevId));
     const meta = metaForSummary();
     const cats = budgetCats();
     Object.keys(b).forEach((c) => { if (!cats.includes(c) && !isIncomeCat(c)) cats.push(c); });
@@ -1046,8 +1052,10 @@
     const card = (c) => {
       const m = S.categories[c] || { type: 'variable' }; const bc = b[c] || { cents: 0, subs: {} };
       const subs = Object.entries(bc.subs || {});
-      return '<div class="bed" data-cat="' + esc(c) + '"><div class="h"><span class="nm">' + catIcon(c) + ' ' + esc(c) + '</span>' +
-        '<input class="money-in" inputmode="decimal" data-f="amount" value="' + val(bc.cents) + '" placeholder="0,00" aria-label="Presupuesto de ' + esc(c) + '">' +
+      const pc = (prev[c] && prev[c].cents) || 0;
+      const hint = pc !== (bc.cents || 0) ? '<span class="sub" style="display:block;font-weight:400">antes: ' + money(pc) + '</span>' : '';
+      return '<div class="bed" data-cat="' + esc(c) + '"><div class="h"><span class="nm">' + catIcon(c) + ' ' + esc(c) + hint + '</span>' +
+        '<input class="money-in" inputmode="decimal" data-f="amount" data-i="bed-sum" value="' + val(bc.cents) + '" placeholder="0,00" aria-label="Presupuesto de ' + esc(c) + '">' +
         '<button class="more-btn" data-a="bed-more" aria-label="Más opciones">⋯</button></div>' +
         '<div class="opts hidden"><div class="seg" style="margin:0 0 8px"><button class="' + (m.type === 'fixed' ? 'on' : '') + '" data-a="bed-type" data-v="fixed">Fijo</button><button class="' + (m.type !== 'fixed' ? 'on' : '') + '" data-a="bed-type" data-v="variable">Variable</button></div>' +
         '<label class="field" style="margin-top:4px"><span>Día habitual de pago (fijos)</span><input class="input" inputmode="numeric" data-f="due" value="' + (m.dueDay || '') + '" placeholder="' + (meta[c] && meta[c].dueInferred ? 'Deducido: ' + meta[c].dueDay : 'Ej. 1') + '"></label>' +
@@ -1055,14 +1063,29 @@
         '<label class="check"><input type="checkbox" data-f="savings"' + (m.savings ? ' checked' : '') + '> Es ahorro / inversión</label>' +
         '<label class="field" style="margin-top:4px"><span>Icono</span><input class="input" data-f="icon" value="' + esc(m.icon || '') + '" maxlength="4"></label>' +
         '<div class="field"><span>Subcategorías con presupuesto (opcional)</span><div class="subs">' +
-        subs.map(([n, v]) => subRow(n, v)).join('') + '</div><button class="btn plain sm" style="margin-top:6px" data-a="bed-addsub">+ Subcategoría</button></div></div></div>';
+        subs.map(([n, v]) => subRow(n, v)).join('') + '</div><button class="btn plain sm" style="margin-top:6px" data-a="bed-addsub">+ Subcategoría</button></div>' +
+        '<button class="mini" style="color:var(--bad)" data-a="bed-clear">Quitar de este mes (poner a 0)</button></div></div>';
     };
-    const body = '<p class="sub" style="margin-bottom:10px">Periodo: ' + esc(C.periodLabel(period())) + '. Toca ⋯ para tipo, día de pago y subcategorías.</p>' +
+    const body = '<p class="sub" style="margin-bottom:10px">Presupuesto de <b>' + esc(C.periodLabel(period())) + ' ' + period().start.slice(0, 4) + '</b>' + (info.from ? ' (copiado de ' + esc(C.periodLabel(period(info.from))) + ')' : '') + '. Toca ⋯ para tipo, día de pago, subcategorías o quitar.</p>' +
       cats.map(card).join('') + '<div class="row-between" style="margin-top:8px;gap:8px"><input class="input" id="bed-newcat" placeholder="Nueva categoría" autocomplete="off"><button class="btn ghost sm" data-a="bed-addcat">Añadir</button></div>';
-    openSheet('Presupuesto', body, '<button class="btn" data-a="budget-save">Guardar presupuesto</button>');
+    openSheet('Presupuesto', body, '<div class="sumline"><span>Total</span><b id="bed-total"></b></div><div class="sub" id="bed-diff" style="margin:-4px 0 8px"></div>' +
+      '<button class="btn" data-a="budget-save">Guardar para ' + esc(C.periodLabel(period())) + '</button>');
+    bedRecalc();
+  }
+  function bedRecalc() {
+    const el = $('#bed-total'); if (!el) return;
+    let total = 0;
+    $$('.bed').forEach((card) => {
+      const a = C.parseAmount($('[data-f="amount"]', card).value);
+      const subs = $$('.subrow [data-s="amount"]', card).reduce((acc, i) => { const v = C.parseAmount(i.value); return acc + (Number.isFinite(v) && v > 0 ? v : 0); }, 0);
+      total += Math.max(Number.isFinite(a) && a > 0 ? a : 0, subs);
+    });
+    el.textContent = money(total);
+    const d = total - (UI.bedPrevTotal || 0);
+    $('#bed-diff').textContent = UI.bedPrevTotal ? (d === 0 ? 'Igual que ' + UI.bedPrevLabel : (d > 0 ? '+' : '−') + money(Math.abs(d), { plain: true }) + ' € respecto a ' + UI.bedPrevLabel + ' (' + money(UI.bedPrevTotal) + ')') : '';
   }
   function subRow(n, v) {
-    return '<div class="subrow"><input class="input" data-s="name" value="' + esc(n || '') + '" placeholder="Subcategoría"><input class="money-in" style="width:100px;min-height:46px;border-radius:12px" inputmode="decimal" data-s="amount" value="' + (v ? money(v, { plain: true }) : '') + '" placeholder="0,00"><button class="btn plain sm" data-a="bed-delsub" aria-label="Quitar">✕</button></div>';
+    return '<div class="subrow"><input class="input" data-s="name" value="' + esc(n || '') + '" placeholder="Subcategoría"><input class="money-in" style="width:100px;min-height:46px;border-radius:12px" inputmode="decimal" data-i="bed-sum" data-s="amount" value="' + (v ? money(v, { plain: true }) : '') + '" placeholder="0,00"><button class="btn plain sm" data-a="bed-delsub" aria-label="Quitar">✕</button></div>';
   }
   function saveBudgetEditor() {
     const cats = {}; let bad = false;
@@ -1323,6 +1346,22 @@
     'hist-open': (v) => { UI.periodId = v; UI.budgetView = 'period'; render(); window.scrollTo(0, 0); },
     'hist-cat': (v) => { UI.histOpen[v] = !UI.histOpen[v]; render(); },
     'budget-edit': () => openBudgetEditor(),
+    'bed-clear': (v, el) => { const card = el.closest('.bed'); $('[data-f="amount"]', card).value = ''; $$('.subrow', card).forEach((r) => r.remove()); bedRecalc(); toast('Se guardará a 0 al pulsar Guardar'); },
+    'budget-dup': () => {
+      const rows = [1, 2, 3, -1, -2].map((k) => C.shiftPeriodId(UI.periodId, k)).map((id) => {
+        const own = !!S.budgets[id]; const pp = period(id);
+        return '<button class="li2" data-a="budget-dup-to" data-v="' + id + '"><span class="l"><b>' + esc(C.periodLabel(pp)) + ' ' + pp.start.slice(0, 4) + '</b><span class="sub" style="display:block">' +
+          (own ? 'Ya tiene presupuesto propio (' + money(budgetTotalOf(S.budgets[id])) + '): se reemplazará' : 'Sin presupuesto propio') + '</span></span><span class="chev">›</span></button>';
+      });
+      openSheet('Duplicar presupuesto', '<p class="sub">Se copia el presupuesto de <b>' + esc(C.periodLabel(period())) + '</b> (' + money(budgetTotalOf(budgetInfo().budget)) + ') al mes que elijas, y se abre para que lo cambies.</p><div class="set-h">Próximos meses</div><div class="list">' + rows.slice(0, 3).join('') + '</div><div class="set-h">Meses anteriores</div><div class="list">' + rows.slice(3).join('') + '</div>');
+    },
+    'budget-dup-to': async (v) => {
+      const src = budgetInfo().budget; if (!src) { toast('Este periodo no tiene presupuesto que copiar'); return; }
+      if (S.budgets[v] && !confirm('Ese mes ya tiene presupuesto propio. ¿Reemplazarlo por una copia de este?')) return;
+      closeSheet();
+      await mutate('Copiado a ' + C.periodLabel(period(v)), () => { const b = clone(src); delete b.closed; S.budgets[v] = b; });
+      UI.periodId = v; render(); openBudgetEditor();
+    },
     'budget-save': () => saveBudgetEditor(),
     'budget-copy': () => { const info = budgetInfo(); if (!info.budget) return; mutate('Presupuesto guardado en este periodo', () => { S.budgets[UI.periodId] = clone(info.budget); delete S.budgets[UI.periodId].closed; }); },
     'budget-copy-prev': () => {
@@ -1340,7 +1379,7 @@
       S.categories[name] = S.categories[name] || { icon: guessIcon(name), type: 'variable' };
       DB.setKV('categories', S.categories); L.known.push(name);
       const tmp = document.createElement('div');
-      tmp.innerHTML = '<div class="bed" data-cat="' + esc(name) + '"><div class="h"><span class="nm">' + guessIcon(name) + ' ' + esc(name) + '</span><input class="money-in" inputmode="decimal" data-f="amount" placeholder="0,00"><button class="more-btn" data-a="bed-more">⋯</button></div>' +
+      tmp.innerHTML = '<div class="bed" data-cat="' + esc(name) + '"><div class="h"><span class="nm">' + guessIcon(name) + ' ' + esc(name) + '</span><input class="money-in" inputmode="decimal" data-f="amount" data-i="bed-sum" placeholder="0,00"><button class="more-btn" data-a="bed-more">⋯</button></div>' +
         '<div class="opts"><div class="seg" style="margin:0 0 8px"><button data-a="bed-type" data-v="fixed">Fijo</button><button class="on" data-a="bed-type" data-v="variable">Variable</button></div>' +
         '<label class="field"><span>Día habitual de pago (fijos)</span><input class="input" inputmode="numeric" data-f="due"></label><label class="check"><input type="checkbox" data-f="estimate"> Importe que cambia: mostrar como estimado</label>' +
         '<label class="check"><input type="checkbox" data-f="savings"> Es ahorro / inversión</label><label class="field"><span>Icono</span><input class="input" data-f="icon" value="' + guessIcon(name) + '" maxlength="4"></label>' +
@@ -1489,6 +1528,7 @@
     },
   };
   const IN = {
+    'bed-sum': () => bedRecalc(),
     'pin-in': async (v, el) => {
       if (v !== 'check' || el.value.length < 4) return;
       if (Date.now() < UI.pinLockUntil) return;
