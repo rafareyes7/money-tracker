@@ -227,6 +227,20 @@
     eq(closed.pendingTotal, 0, 'nada por pagar');
     eq(closed.budgetTotal, 2500 + 0 + 5000, 'presupuesto efectivo = lo gastado en lo cerrado');
   });
+  test('Subcategoría del presupuesto con otro nombre que la etiqueta (electricity ↔ electricidad)', () => {
+    eq(C.matchSubNames(['electricity', 'internet'], ['electricidad', 'internet']), { electricity: 'electricidad' });
+    eq(C.matchSubNames(['agua'], ['Agua']), { agua: 'Agua' });
+    eq(C.matchSubNames(['gas'], ['gasolina']), {});
+    const P = C.getPeriod('2026-09');
+    const s = C.summarize([{ id: 'x', date: '2026-10-15', cents: 13489, treatment: 'expense', category: 'House Services', subcategory: 'electricidad' }],
+      { cats: { 'House Services': { cents: 13000, subs: { electricity: 13000 } } } }, { 'House Services': { type: 'fixed' } }, P, '2026-10-25');
+    eq(s.pendingTotal, 0, 'la luz está pagada');
+  });
+  test('Mensaje de Bizum dentro de la descripción', () => {
+    eq(C.bizumMessage('Bizum enviado a ANA PEREZ LOPEZ Cena del viernes'), 'Cena del viernes');
+    eq(C.bizumMessage('Bizum enviado a ANA PEREZ Sin concepto'), '');
+    eq(C.bizumMessage('Pago en LIDL'), '');
+  });
   test('Día de pago deducido del historial', () => {
     const d = C.inferDueDays([{ category: 'Rent', treatment: 'expense', date: '2026-10-01' }, { category: 'House Services', subcategory: 'agua', treatment: 'expense', date: '2026-10-05' }], ['Rent', 'House Services']);
     eq(d.Rent, 1); eq(d['House Services|agua'], 5);

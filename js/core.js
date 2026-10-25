@@ -318,14 +318,25 @@
       const cents = parseAmount(r[cols.amount]);
       if (!date || !Number.isFinite(cents) || cents === 0) { if (r.some((x) => String(x || '').trim())) skipped++; continue; }
       const get = (k) => (cols[k] >= 0 && r[cols[k]] !== undefined && r[cols[k]] !== null ? String(r[cols[k]]).trim() : '');
+      let comment = get('comment');
+      if (!comment) comment = bizumMessage(get('description'));
       out.push({
         source: 'bank', date, cents,
         description: get('description') || get('comment') || '(sin descripción)',
-        comment: get('comment'),
+        comment,
         bankCategory: get('category'), bankSubcategory: get('subcategory'),
       });
     }
     return { movements: assignIds(out, 'b_'), skipped, error: null, balance };
+  }
+  /** 'Bizum enviado a NOMBRE APELLIDO Mensaje libre' → 'Mensaje libre' ('' si no hay o es “Sin concepto”). */
+  function bizumMessage(desc) {
+    const m = String(desc || '').match(/^bizum\s+(?:enviado\s+a|recibido\s+de)\s+(.*)$/i);
+    if (!m) return '';
+    const words = m[1].split(/\s+/); let i = 0;
+    while (i < words.length && words[i] === words[i].toUpperCase() && /[A-ZÁÉÍÓÚÑÜ]/.test(words[i])) i++;
+    const msg = words.slice(i).join(' ').trim();
+    return /^sin concepto$/i.test(msg) ? '' : msg;
   }
   /** Texto pegado desde Excel/Numbers (tabulado) → movimientos del banco. */
   function parseBankText(text) {
@@ -609,6 +620,29 @@
 
   // ───────────────────────── Presupuesto ─────────────────────────
 
+  /**
+   * Relaciona subcategorías del presupuesto con etiquetas usadas que se escriben distinto
+   * (mayúsculas, acentos, o idioma: 'electricity' ↔ 'electricidad'). Devuelve { subPresupuesto: etiqueta }.
+   */
+  function matchSubNames(budgetSubs, tags) {
+    const out = {}; const used = new Set();
+    const exact = new Set(tags.map(normText));
+    budgetSubs.forEach((bs) => {
+      const nb = normText(bs).replace(/ /g, '');
+      if (exact.has(normText(bs)) && tags.includes(bs)) return;
+      let best = null, bestLen = 0;
+      tags.forEach((t) => {
+        if (used.has(t) || budgetSubs.includes(t)) return;
+        const nt = normText(t).replace(/ /g, '');
+        if (nt === nb) { best = t; bestLen = 99; return; }
+        let k = 0; while (k < nb.length && k < nt.length && nb[k] === nt[k]) k++;
+        if (k >= 6 && k > bestLen) { best = t; bestLen = k; }
+      });
+      if (best) { out[bs] = best; used.add(best); }
+    });
+    return out;
+  }
+
   function colorFor(pct) { return pct > 100 ? 'r' : pct >= 80 ? 'a' : 'g'; }
 
   /** Día habitual de pago deducido del último cargo de cada categoría fija. */
@@ -658,10 +692,13 @@
       const original = (bcats[name] && bcats[name].cents) || 0;
       const s = spent[name] || 0;
       const subsB = (bcats[name] && bcats[name].subs) || {};
-      const subNames = new Set([...Object.keys(subsB), ...Object.keys(subSpent[name] || {}).filter(Boolean)]);
+      const spentTags = Object.assign({}, subSpent[name] || {});
+      const alias = matchSubNames(Object.keys(subsB), Object.keys(spentTags).filter(Boolean));
+      Object.entries(alias).forEach(([bn, tag]) => { spentTags[bn] = (spentTags[bn] || 0) + spentTags[tag]; delete spentTags[tag]; });
+      const subNames = new Set([...Object.keys(subsB), ...Object.keys(spentTags).filter(Boolean)]);
       const subs = [...subNames].map((sn) => {
-        const sb = subsB[sn] || 0, ss = (subSpent[name] || {})[sn] || 0, cl = !!closedMap[name + '|' + sn];
-        return { name: sn, budget: cl ? Math.min(sb, Math.max(ss, 0)) : sb, originalBudget: sb, spent: ss, closed: cl };
+        const sb = subsB[sn] || 0, ss = spentTags[sn] || 0, cl = !!closedMap[name + '|' + sn];
+        return { name: sn, budget: cl ? Math.min(sb, Math.max(ss, 0)) : sb, originalBudget: sb, spent: ss, closed: cl, alias: alias[sn] || '' };
       }).sort((x, y) => y.budget - x.budget || y.spent - x.spent);
       const closed = !!closedMap[name];
       // Cerrada: el presupuesto efectivo es lo gastado (si te pasaste, se mantiene el exceso).
@@ -864,11 +901,11 @@
     DEFAULT_PERIOD_CFG, naturalPeriodStart, getPeriod, periodIdForDate, shiftPeriodId, detectPeriodId, periodLabel, dueDateInPeriod,
     normText, tokens, similarity, merchantKey, ruleMatches,
     parseCSV, csvField, hashId, assignIds,
-    parseBankRows, parseBankText, parseToshl,
+    parseBankRows, parseBankText, parseToshl, bizumMessage,
     matchMovements, pairKey, matchId,
     DEFAULT_RULES, suggestForBank, learnRule,
     buildLedger, isPending,
-    colorFor, inferDueDays, summarize, projectBalance, buildHistory, householdSummary,
+    colorFor, matchSubNames, inferDueDays, summarize, projectBalance, buildHistory, householdSummary,
     TOSHL_HEADER, toToshlCSV, toLedgerJSON, fromV2Profiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;

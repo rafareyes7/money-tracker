@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.3.1';
+  const APP_VERSION = '1.3.2';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -132,6 +132,10 @@
     S.rejected = kv.rejected || {};
     S.partner = kv.partner || { name: 'Pareja', periods: {} };
     S.movements = {}; movements.forEach((m) => { S.movements[m.id] = m; });
+    // Movimientos importados antes de v1.3.2: sacar el mensaje de los Bizum de la descripción.
+    const fixed = movements.filter((m) => m.source === 'bank' && !m.comment && C.bizumMessage(m.description));
+    fixed.forEach((m) => { m.comment = C.bizumMessage(m.description); });
+    if (fixed.length) await DB.putMany('movements', fixed);
     S.matches = {}; matches.forEach((m) => { S.matches[m.id] = m; });
     if (!kv.settings) await Promise.all([DB.setKV('settings', S.settings), DB.setKV('categories', S.categories), DB.setKV('rules', S.rules)]);
   }
@@ -632,7 +636,11 @@
     const d = UI.draft; if (!canCommit()) return;
     const incoming = [].concat(d.bank && !d.bank.error ? d.bank.movements : [], d.toshl && !d.toshl.error ? d.toshl.movements : []);
     const fresh = []; let dup = 0;
-    incoming.forEach((m) => { if (S.movements[m.id]) dup++; else { S.movements[m.id] = m; fresh.push(m); } });
+    incoming.forEach((m) => {
+      const old = S.movements[m.id];
+      if (old) { dup++; if (!old.comment && m.comment) { old.comment = m.comment; fresh.push(old); } }
+      else { S.movements[m.id] = m; fresh.push(m); }
+    });
     await DB.putMany('movements', fresh);
     const nb = d.bank && !d.bank.error && d.bank.balance;
     if (nb && (!S.settings.balance || nb.date >= S.settings.balance.date)) S.settings.balance = { cents: nb.cents, date: nb.date, source: 'banco' };
@@ -765,6 +773,7 @@
       t('Saldo del periodo', money(s.balance, { sign: true }), 'color:var(' + (s.balance >= 0 ? '--ok' : '--bad') + ')') + t('Presupuesto', money(s.budgetTotal)) + t('Por pagar', money(s.pendingTotal), 'color:var(--warn)') + '</div>';
     h += '<div class="sec-h"><b>Variables</b><span>' + money(s.varBudget) + ' · ' + (s.available >= 0 ? 'quedan ' + money(s.available) : 'pasado ' + money(-s.available)) + '</span></div>';
     h += '<div class="pace"><i></i> Ritmo esperado hoy: ' + s.elapsedPct + ' % (día ' + s.elapsed + ' de ' + s.totalDays + ')</div>';
+    if (s.daysLeft <= 5 && s.available > 0) h += '<p class="note" style="margin:0 4px 10px">Final del periodo: si no vas a gastar lo que queda en alguna categoría, pulsa “Cerrar este periodo” en ella.</p>';
     s.variable.forEach((c) => { h += budCard(c, s); });
     if (!s.variable.length) h += '<p class="note">Sin categorías variables.</p>';
     h += '<div class="sec-h"><b>Fijos</b><span>' + money(s.fixedBudget) + ' · por pagar ' + money(s.pendingTotal) + '</span></div><div class="list">';
@@ -857,8 +866,11 @@
       '<div class="bar"><div class="f ' + c.color + '" style="width:' + Math.max(0, width).toFixed(1) + '%"></div><div class="m" style="left:' + s.elapsedPct + '%"></div></div>' +
       '<div class="foot"><span>' + (c.closed ? 'Cerrada · presupuesto era ' + money(c.originalBudget) : c.remaining >= 0 ? money(c.remaining) + ' restante' : money(-c.remaining) + ' pasado') + '</span><span class="p ' + c.color + '">' + (c.budget > 0 || c.closed ? c.pct + ' %' : 'sin presupuesto') + '</span></div>';
     const subs = c.subs.filter((x) => x.name);
-    if (subs.length) h += '<div class="subcats">' + subs.map((x) => esc(x.name) + ' ' + money(x.spent, { plain: true }) + (x.budget ? '/' + money(x.budget, { plain: true }) : '')).join(' · ') + '</div>';
+    if (subs.length) h += '<div class="subcats">' + subs.map((x) => esc(x.name) + (x.alias ? ' (' + esc(x.alias) + ')' : '') + ' ' + money(x.spent, { plain: true }) + (x.budget ? '/' + money(x.budget, { plain: true }) : '')).join(' · ') + '</div>';
     h += '</button>';
+    if (!open && !c.closed && c.originalBudget > c.spent && c.spent >= 0 && s.daysLeft <= 5) {
+      h += '<button class="mini" data-a="close-item" data-v="' + esc(c.name) + '">Cerrar este periodo (quedan ' + money(c.originalBudget - c.spent) + ')</button>';
+    }
     if (open) {
       const list = c.entries.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
       h += '<div class="detail">' + list.slice(0, 6).map((e) => '<div class="li"><span>' + C.formatDateShort(e.date) + '</span><span>' + (e.treatment === 'refund' ? '↩︎ ' : '') + esc(e.description) + '</span>' + signedMoney(e) + '</div>').join('') +
