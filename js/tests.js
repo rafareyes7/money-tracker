@@ -260,6 +260,23 @@
     eq(s.accounts.map((x) => [x.name, x.available, x.lent]), [['N26', 40000, 10000], ['ING', 15000, 0], ['Efectivo', 10000, 0]]);
     eq(s.available, 65000);
   });
+  test('Explicar: de dónde sale un gasto conciliado (fecha valor y regla)', () => {
+    const mv = { t1: { id: 't1', source: 'toshl', date: '2026-10-16', cents: -1800, category: 'Subscriptions', subcategory: 'ia', description: 'Claude' },
+      b1: { id: 'b1', source: 'bank', date: '2026-10-19', cents: -1800, description: 'Pago en CLAUDE.AI' } };
+    const matches = { x: { id: 'x', toshlIds: ['t1'], bankIds: ['b1'], status: 'auto', reason: 'Mismo importe y fecha' } };
+    const e = C.buildLedger({ movements: mv, matches, decisions: {}, rules: [] })[0];
+    const ex = C.explainEntry(e, { movements: mv, matches, catType: () => 'fixed', periodLabel: '25 sep – 25 oct' });
+    const txt = JSON.stringify(ex);
+    ok(txt.includes('3 día(s) después'), 'fecha valor'); ok(txt.includes('Categoría tomada de Toshl')); ok(txt.includes('(fijo)'));
+  });
+  test('Explicar: cómo se calcula “Te quedan” y el gasto total', () => {
+    const P = C.getPeriod('2026-09');
+    const s = C.summarize([{ id: 'a', date: '2026-10-01', cents: 30000, treatment: 'expense', category: 'Groceries' }, { id: 'b', date: '2026-10-02', cents: 5000, treatment: 'expense', category: 'Extra' }],
+      { cats: { Groceries: { cents: 50000 }, Extra: { cents: 10000 } } }, {}, P, '2026-10-10');
+    const f = C.explainFigure('available', s);
+    eq(f.lines.map((l) => l.cents), [60000, 35000]); eq(f.result.cents, 25000);
+    const g = C.explainFigure('spent', s); eq(g.breakdown[0].label, 'Groceries'); eq(g.top[0].cents, 30000);
+  });
   test('Día de pago deducido del historial', () => {
     const d = C.inferDueDays([{ category: 'Rent', treatment: 'expense', date: '2026-10-01' }, { category: 'House Services', subcategory: 'agua', treatment: 'expense', date: '2026-10-05' }], ['Rent', 'House Services']);
     eq(d.Rent, 1); eq(d['House Services|agua'], 5);

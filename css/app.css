@@ -163,6 +163,11 @@ select.chip.on { background-color: var(--text); }
 .suggest .t b { color: var(--accent); }
 .suggest .btn { min-height: 44px; width: 52px; padding: 0; }
 .mv .chips { margin-top: 8px; }
+.info { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 28px; margin: -6px -4px; color: var(--accent); font-weight: 700; font-size: 15px; cursor: pointer; vertical-align: middle; }
+.explain { background: var(--surface2); border-radius: 12px; padding: 0 12px; margin: 4px 0 10px; }
+.explain summary { min-height: 44px; display: flex; align-items: center; font-weight: 600; cursor: pointer; }
+.ex-step { font-size: 13px; padding: 8px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.ex-step b { display: block; margin-bottom: 2px; }
 .mini { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 0; color: var(--accent); font-size: 13px; font-weight: 600; }
 .comment { font-size: 13px; margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: var(--surface2); color: var(--text); overflow-wrap: anywhere; }
 .resolved-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }

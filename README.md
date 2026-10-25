@@ -76,6 +76,8 @@ No se guarda número de cuenta ni titular: las filas anteriores a la cabecera de
 
 **v1.5 · Ahorros por cuenta y con PIN:** cada apunte tiene **Cuenta** (N26, ING, Efectivo…) y hay un reparto “Dónde están”. Ahorros pide un PIN de 4 números. **El PIN no está en el código:** se crea en el dispositivo la primera vez y se guarda como hash PBKDF2-SHA256 (150.000 iteraciones, sal aleatoria) en `kv.savingsPin`. Se bloquea al salir de Ahorros o al cerrar la app. 5 fallos → espera de 30 s. Es una protección visual: la copia de seguridad JSON contiene los ahorros sin cifrar.
 
+**v1.6 · Explicar (sin IA):** ⓘ junto a las cifras (Te quedan, por día, Gastado, Por pagar, Ahorro, Saldo, Previsión, Al final del periodo, Ingresos y cada categoría) abre la fórmula con los números reales, el desglose y los movimientos más grandes. En cada movimiento, "🔎 De dónde sale" muestra origen (banco/Toshl), emparejamiento, clasificación y cómo cuenta. Se activa o desactiva en Ajustes → Explicaciones. Lo cerrado en un periodo se ve siempre con un botón "Deshacer" (Inicio y Presupuesto).
+
 ## 6. Riesgos y cómo están resueltos
 
 | Riesgo | Solución |

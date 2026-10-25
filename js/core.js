@@ -878,6 +878,111 @@
     return { deposits, withdrawals, lent, repaid, total: deposits - withdrawals, available: deposits - withdrawals - lent, pendingLoans, bySource, accounts };
   }
 
+  // ───────────────────────── Explicaciones (sin IA) ─────────────────────────
+
+  const REASON_TXT = {
+    'Mismo importe y fecha': 'mismo importe y fecha cercana (±3 días)',
+    'Mismo importe y comercio': 'mismo importe y mismo comercio',
+    'Importe parecido': 'importe parecido (±0,10 € o ±2 %)',
+    'Enlazado a mano': 'lo enlazaste tú',
+  };
+  const SRC_TXT = { regla: 'una regla', historial: 'cómo lo clasificaste otras veces', banco: 'la categoría que pone el banco', defecto: 'la categoría por defecto' };
+
+  /** ¿De dónde sale este movimiento? Pasos: origen, emparejamiento, clasificación y en qué cuenta. */
+  function explainEntry(e, ctx) {
+    ctx = ctx || {};
+    const mv = ctx.movements || {}, matches = ctx.matches || {}, dec = (ctx.decisions || {})[e.id];
+    const steps = [];
+    const toshl = (e.toshlIds || []).map((id) => mv[id]).filter(Boolean);
+    const bank = (e.bankIds || []).map((id) => mv[id]).filter(Boolean);
+    const fmtMv = (m) => formatDate(m.date) + ' · ' + (m.source === 'bank' ? m.description + (m.comment ? ' (💬 ' + m.comment + ')' : '') : [m.category, m.subcategory].filter(Boolean).join(' › ') + (m.description ? ' · ' + m.description : '')) + ' · ' + formatMoney(m.cents);
+    steps.push({ icon: '📄', title: 'Origen', lines: [].concat(
+      bank.map((m) => '🏦 Banco: ' + fmtMv(m)), toshl.map((m) => '📱 Toshl: ' + fmtMv(m)),
+      !bank.length && !toshl.length ? ['Sin origen (movimiento borrado)'] : []) });
+    const m = e.matchId ? matches[e.matchId] : null;
+    let pair;
+    if (e.status === 'matched' && m) {
+      pair = 'Emparejado: ' + (m.status === 'confirmed' ? 'lo confirmaste tú (' + (REASON_TXT[m.reason] || m.reason) + ')' : m.status === 'manual' ? 'lo enlazaste tú' : 'automático por ' + (REASON_TXT[m.reason] || m.reason)) + '.';
+      if (e.bankDate && e.bankDate !== e.date) pair += ' El banco lo cargó ' + Math.abs(diffDays(e.date, e.bankDate)) + ' día(s) ' + (diffDays(e.date, e.bankDate) > 0 ? 'después' : 'antes') + ' (fecha valor).';
+      if (bank.length > 1 || toshl.length > 1) pair += ' Es un apunte partido: ' + toshl.length + ' en Toshl ↔ ' + bank.length + ' en el banco.';
+      if (toshl.length === 1 && bank.length && e.toshlCents !== e.bankCents) pair += ' Se usa el importe del banco (' + formatMoney(e.bankCents) + '), no el de Toshl (' + formatMoney(e.toshlCents) + ').';
+    } else if (e.status === 'possible') pair = 'Posible pareja por ' + (REASON_TXT[e.reason] || e.reason || 'parecido') + '. Pendiente de que la confirmes.';
+    else if (e.status === 'bank_only') pair = 'Solo está en el banco: no hay un apunte en Toshl con ese importe y fecha.';
+    else pair = 'Solo está en Toshl: no hay cargo en el banco (efectivo, otra tarjeta o aún no cobrado).';
+    steps.push({ icon: '🔗', title: 'Emparejamiento', lines: [pair] });
+    let cls;
+    if (dec) cls = 'Lo clasificaste tú: ' + ((dec.treatment === 'excluded') ? 'excluido' : (dec.category || '—') + (dec.subcategory ? ' › ' + dec.subcategory : '')) + '.';
+    else if (e.status === 'bank_only' && e.suggestion) {
+      const sg = e.suggestion;
+      cls = 'Sugerencia (aún sin confirmar) según ' + (SRC_TXT[sg.source] || 'la app') + (sg.pattern ? ' “' + sg.pattern + '”' : '') + '.';
+    } else cls = 'Categoría tomada de Toshl: ' + (e.category || '—') + (e.subcategory ? ' › ' + e.subcategory : '') + '.';
+    steps.push({ icon: '🏷️', title: 'Clasificación', lines: [cls] });
+    const type = ctx.catType ? ctx.catType(e.category) : '';
+    const eff = {
+      expense: 'Suma ' + formatMoney(e.cents) + ' al gasto de ' + (e.category || 'Sin categoría') + (type ? ' (' + (type === 'fixed' ? 'fijo' : 'variable') + ')' : '') + '.',
+      refund: 'Resta ' + formatMoney(e.cents) + ' del gasto de ' + (e.category || '— (elige categoría)') + ' (reembolso).',
+      income: 'Suma ' + formatMoney(e.cents) + ' a los ingresos.',
+      excluded: 'No cuenta en ningún cálculo (excluido).',
+    }[e.treatment];
+    steps.push({ icon: '🧮', title: 'Cómo cuenta', lines: [eff, ctx.periodLabel ? 'Periodo: ' + ctx.periodLabel + ' (por la fecha ' + formatDate(e.date) + ').' : ''].filter(Boolean) });
+    if (!e.resolved || e.status === 'possible') steps.push({ icon: '⚠️', title: 'Pendiente', lines: ['Aún no está revisado: puede cambiar al conciliar.'] });
+    return { steps };
+  }
+
+  /**
+   * ¿Cómo se calculó esta cifra? key: available | perDay | spent | pending | margin | balance | closing | endBalance | income | cat:Nombre
+   * Devuelve { title, lines: [{ label, cents, op }], result: { label, cents }, breakdown: [{ label, cents, sub }], top: [entry], note }.
+   */
+  function explainFigure(key, s, extra) {
+    extra = extra || {};
+    const L = (label, cents, op) => ({ label, cents, op: op || '' });
+    const exp = (list) => list.filter((e) => e.treatment === 'expense').slice().sort((a, b) => b.cents - a.cents).slice(0, 5);
+    const allEntries = s.cats.reduce((a, c) => a.concat(c.entries), []);
+    const catsBy = (list, f) => list.filter((c) => f(c) !== 0).map((c) => ({ label: c.name, cents: f(c), sub: c.closed ? 'cerrada' : '' })).sort((a, b) => b.cents - a.cents);
+    if (key === 'available') return {
+      title: 'Te quedan para el día a día', lines: [L('Presupuesto de categorías variables', s.varBudget), L('Gastado en variables', s.varSpent, '−')],
+      result: { label: 'Te quedan', cents: s.available }, breakdown: catsBy(s.variable, (c) => c.remaining),
+      note: 'Solo cuentan las categorías variables. Las fijas van en “Por pagar”. Las categorías cerradas cuentan solo lo gastado.' };
+    if (key === 'perDay') return {
+      title: 'Gasto por día', lines: [L('Te quedan', Math.max(0, s.available)), L('Días que faltan (incluido hoy): ' + s.daysLeft, null, '÷')],
+      result: { label: 'Por día', cents: s.perDay || 0 }, breakdown: [], note: '' };
+    if (key === 'spent') return {
+      title: 'Gastado en el periodo', lines: [], result: { label: 'Gastado', cents: s.spentTotal },
+      breakdown: catsBy(s.cats, (c) => c.spent).map((b) => Object.assign(b, { sub: (b.sub ? b.sub + ' · ' : '') + (s.spentTotal ? Math.round((b.cents / s.spentTotal) * 100) + ' %' : '') })),
+      top: exp(allEntries), note: 'Gastos menos reembolsos. No incluye lo excluido ni los ingresos.' };
+    if (key === 'pending') return {
+      title: 'Por pagar', lines: s.pending.map((p) => L(p.category + (p.sub ? ' › ' + p.sub : '') + (p.due ? ' (~' + formatDateShort(p.due) + ')' : ''), p.cents, '+')),
+      result: { label: 'Por pagar', cents: s.pendingTotal }, breakdown: [],
+      note: 'Categorías fijas cuyo presupuesto aún no se ha cobrado (presupuesto − pagado). Si algo no se pagará, ciérralo.' };
+    if (key === 'margin') return {
+      title: 'Ahorro previsto', lines: [L('Ingresos', s.income), L('Gastado', s.spentTotal, '−'), L('Por pagar', s.pendingTotal, '−'), L('Te quedan (si lo gastas)', Math.max(0, s.available), '−')],
+      result: { label: s.margin >= 0 ? 'Ahorro previsto' : 'Déficit previsto', cents: s.margin }, breakdown: [], note: 'Lo que sobraría si gastas justo tu presupuesto.' };
+    if (key === 'balance') return {
+      title: 'Saldo de hoy', lines: [L('Ingresos', s.income), L('Gastado', s.spentTotal, '−')], result: { label: 'Saldo hoy', cents: s.balance }, breakdown: [], note: 'Del periodo, no de tu cuenta del banco.' };
+    if (key === 'closing') return {
+      title: 'Previsión al cierre', lines: [L('Ingresos', s.income), L('Fijos ya pagados', s.fixedSpent, '−'), L('Por pagar', s.pendingTotal, '−'),
+        L('Variables al ritmo actual (' + formatMoney(s.varSpent) + ' en ' + s.elapsed + ' de ' + s.totalDays + ' días)', s.varProjected, '−')],
+      result: { label: 'Previsión al cierre', cents: s.closing }, breakdown: [], note: 'Si sigues gastando en variables al mismo ritmo que hasta hoy.' };
+    if (key === 'endBalance' && extra.balance) {
+      const p = projectBalance(s, extra.balance.cents);
+      return { title: 'Al final del periodo', lines: [L('Saldo del banco (' + formatDate(extra.balance.date) + ')', p.balance), L('Por pagar', p.pending, '−'), L('Resto del día a día (presupuesto)', p.restBudget, '−')],
+        result: { label: 'Si cumples el presupuesto', cents: p.ifBudget }, breakdown: [{ label: 'Al ritmo actual', cents: p.atPace, sub: 'resta ' + formatMoney(p.restPace) + ' en vez de ' + formatMoney(p.restBudget) }],
+        note: 'Supone que no entran más ingresos en este periodo.' };
+    }
+    if (key === 'income') {
+      return { title: 'Ingresos', lines: [], result: { label: 'Ingresos', cents: s.income }, breakdown: (extra.incomeEntries || []).map((e) => ({ label: formatDateShort(e.date) + ' · ' + (e.description || e.category), cents: e.cents, sub: e.category })), note: 'Movimientos marcados como ingreso (nómina, Bizum como ingreso…).' };
+    }
+    if (key.startsWith('cat:')) {
+      const c = s.cats.find((x) => x.name === key.slice(4)); if (!c) return null;
+      const refunds = c.entries.filter((e) => e.treatment === 'refund').reduce((a, e) => a + e.cents, 0);
+      const gross = c.entries.filter((e) => e.treatment === 'expense').reduce((a, e) => a + e.cents, 0);
+      return { title: c.name, lines: [L('Presupuesto' + (c.closed ? ' (cerrada; era ' + formatMoney(c.originalBudget) + ')' : ''), c.budget), L('Gastos (' + c.entries.filter((e) => e.treatment === 'expense').length + ')', gross, '−'), L('Reembolsos', refunds, '+')],
+        result: { label: c.remaining >= 0 ? 'Restante' : 'Pasado', cents: c.remaining }, breakdown: c.subs.filter((x) => x.name).map((x) => ({ label: x.name, cents: x.spent, sub: x.budget ? 'de ' + formatMoney(x.budget) : '' })),
+        top: exp(c.entries), note: c.type === 'fixed' ? 'Categoría fija.' : 'Categoría variable.' };
+    }
+    return null;
+  }
+
   // ───────────────────────── Exportación ─────────────────────────
 
   const TOSHL_HEADER = ['Fecha', 'Cuenta', 'Categoría', 'Etiquetas', 'Cantidad de gasto', 'Cantidad de ingreso', 'Divisa', 'En la divisa principal', 'Divisa principal', 'Descripción'];
@@ -933,7 +1038,7 @@
     matchMovements, pairKey, matchId,
     DEFAULT_RULES, suggestForBank, learnRule,
     buildLedger, isPending,
-    colorFor, matchSubNames, inferDueDays, summarize, projectBalance, buildHistory, householdSummary, savingsSummary,
+    colorFor, matchSubNames, inferDueDays, summarize, projectBalance, buildHistory, householdSummary, savingsSummary, explainEntry, explainFigure,
     TOSHL_HEADER, toToshlCSV, toLedgerJSON, fromV2Profiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;

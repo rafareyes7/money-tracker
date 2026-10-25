@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.5.0';
+  const APP_VERSION = '1.6.0';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -14,6 +14,8 @@
     return '<span class="amt' + (v > 0 ? ' pos' : '') + '">' + money(v, { sign: true }) + '</span>';
   };
   const clone = (x) => JSON.parse(JSON.stringify(x));
+  /** Botón ⓘ para explicar una cifra (si las explicaciones están activadas). */
+  const infoBtn = (key) => (S.settings && S.settings.explainOn !== false ? '<span class="info" role="button" tabindex="0" data-a="explain" data-v="' + esc(key) + '" aria-label="Cómo se calcula">ⓘ</span>' : '');
   /** Comentario del banco (p. ej. el mensaje de un Bizum). */
   const commentLine = (txt) => (txt ? '<div class="comment">💬 ' + esc(txt) + '</div>' : '');
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
@@ -266,17 +268,17 @@
     const avail = s.available;
     const base = Math.max(1, s.spentTotal + s.pendingTotal + Math.max(0, avail) + Math.max(0, s.margin));
     const w = (v) => (Math.max(0, v) / base * 100).toFixed(2) + '%';
-    h += '<div class="hero"><div class="lbl">' + (avail >= 0 ? 'Te quedan para el día a día' : 'Te has pasado en el día a día') + '</div>' +
+    h += '<div class="hero"><div class="lbl">' + (avail >= 0 ? 'Te quedan para el día a día' : 'Te has pasado en el día a día') + ' ' + infoBtn('available') + '</div>' +
       '<div class="big' + (avail < 0 ? ' neg' : '') + '">' + money(avail) + '</div>' +
-      '<div class="perday">' + (s.daysLeft > 0 ? s.daysLeft + ' día' + (s.daysLeft > 1 ? 's' : '') + ' · <b>≈ ' + money(s.perDay) + ' / día</b>' : (p.end < today() ? 'Periodo cerrado' : 'El periodo aún no ha empezado')) + '</div>' +
+      '<div class="perday">' + (s.daysLeft > 0 ? s.daysLeft + ' día' + (s.daysLeft > 1 ? 's' : '') + ' · <b>≈ ' + money(s.perDay) + ' / día</b> ' + infoBtn('perDay') : (p.end < today() ? 'Periodo cerrado' : 'El periodo aún no ha empezado')) + '</div>' +
       '<div class="bar-stack" aria-hidden="true"><i style="width:' + w(s.spentTotal) + ';background:var(--seg-spent)"></i><i style="width:' + w(s.pendingTotal) + ';background:var(--seg-due)"></i><i style="width:' + w(avail) + ';background:var(--seg-free)"></i><i style="width:' + w(s.margin) + ';background:var(--seg-save)"></i></div>' +
-      '<div class="legend"><span style="--c:var(--seg-spent)"><em>Gastado</em><b>' + money(s.spentTotal) + '</b></span><span style="--c:var(--seg-due)"><em>Por pagar</em><b>' + money(s.pendingTotal) + '</b></span>' +
-      '<span style="--c:var(--seg-free)"><em>Disponible</em><b>' + money(Math.max(0, avail)) + '</b></span><span style="--c:var(--seg-save)"><em>' + (s.margin >= 0 ? 'Ahorro' : 'Déficit') + '</em><b>' + money(s.margin) + '</b></span></div>' +
+      '<div class="legend"><span style="--c:var(--seg-spent)"><em>Gastado ' + infoBtn('spent') + '</em><b>' + money(s.spentTotal) + '</b></span><span style="--c:var(--seg-due)"><em>Por pagar ' + infoBtn('pending') + '</em><b>' + money(s.pendingTotal) + '</b></span>' +
+      '<span style="--c:var(--seg-free)"><em>Disponible</em><b>' + money(Math.max(0, avail)) + '</b></span><span style="--c:var(--seg-save)"><em>' + (s.margin >= 0 ? 'Ahorro' : 'Déficit') + ' ' + infoBtn('margin') + '</em><b>' + money(s.margin) + '</b></span></div>' + closedVarLine(s) +
       '<div class="sub" style="margin-top:8px">' + (s.income ? 'Sobre ingresos de ' + money(s.income) : 'Aún no hay ingresos en este periodo') + (info.from ? ' · presupuesto de ' + esc(C.periodLabel(period(info.from))) : '') + '</div></div>';
-    h += '<div class="tiles"><div class="tile"><small>Saldo hoy</small><b>' + money(s.balance, { sign: true }) + '</b><span class="s">ingresos − gastado</span></div>' +
-      '<div class="tile"><small>Previsión al cierre</small><b style="color:var(' + (s.closing >= 0 ? '--ok' : '--bad') + ')">' + money(s.closing, { sign: true }) + '</b><span class="s">al ritmo actual</span></div></div>';
+    h += '<div class="tiles"><div class="tile"><small>Saldo hoy ' + infoBtn('balance') + '</small><b>' + money(s.balance, { sign: true }) + '</b><span class="s">ingresos − gastado</span></div>' +
+      '<div class="tile"><small>Previsión al cierre ' + infoBtn('closing') + '</small><b style="color:var(' + (s.closing >= 0 ? '--ok' : '--bad') + ')">' + money(s.closing, { sign: true }) + '</b><span class="s">al ritmo actual</span></div></div>';
     h += balanceCard(s, p);
-    h += '<div class="card"><div class="row-between"><h3>⏳ Por pagar</h3><span class="amt">' + money(s.pendingTotal) + '</span></div><div style="margin-top:6px">';
+    h += '<div class="card"><div class="row-between"><h3>⏳ Por pagar ' + infoBtn('pending') + '</h3><span class="amt">' + money(s.pendingTotal) + '</span></div><div style="margin-top:6px">';
     if (!s.pending.length) h += '<p class="sub" style="padding:8px 0">Nada pendiente de los gastos fijos. 🎉</p>';
     const meta = metaForSummary();
     s.pending.forEach((it) => {
@@ -287,6 +289,7 @@
         '<div class="sub">' + dueTxt + inf + (it.estimate ? ' · estimado' : '') + '</div><button class="mini" data-a="close-item" data-v="' + esc(it.sub ? it.category + '|' + it.sub : it.category) + '">No se pagará este periodo</button></div><span class="amt">' + est + money(it.cents) + '</span></div>';
     });
     h += '</div>';
+    h += closedFixedLines(s);
     if (s.paid.length) h += '<div class="sub" style="margin-top:6px">✓ Ya pagado: ' + s.paid.map((c) => esc(c.name)).join(', ') + ' · ' + money(s.paid.reduce((a, c) => a + c.spent, 0)) + '</div>';
     h += '</div>';
     return h + alertsCard(s);
@@ -301,7 +304,7 @@
     const pr = C.projectBalance(s, b.cents);
     const stale = b.date < p.start;
     const origin = (b.source === 'banco' ? 'del banco' : 'tuyo') + ', ' + C.formatDateShort(b.date);
-    return '<button class="card" style="width:100%;text-align:left;display:block" data-a="balance-sheet"><div class="row-between"><h3>💶 Al final del periodo</h3><span class="chev">›</span></div>' +
+    return '<button class="card" style="width:100%;text-align:left;display:block" data-a="balance-sheet"><div class="row-between"><h3>💶 Al final del periodo ' + infoBtn('endBalance') + '</h3><span class="chev">›</span></div>' +
       '<div class="row-between" style="margin-top:8px;align-items:baseline"><span class="sub">Si cumples el presupuesto</span><b class="amt" style="font-size:22px;color:var(' + (pr.ifBudget >= 0 ? '--ok' : '--bad') + ')">' + money(pr.ifBudget) + '</b></div>' +
       '<div class="row-between" style="margin-top:4px"><span class="sub">Al ritmo actual</span><b class="amt">' + money(pr.atPace) + '</b></div>' +
       '<div class="sub" style="margin-top:8px">Saldo ' + money(b.cents) + ' (' + origin + ') − por pagar ' + money(pr.pending) + ' − resto del día a día ' + money(pr.restBudget) + '</div>' +
@@ -483,6 +486,21 @@
     mutate('Datos de ' + nm + ' guardados', () => { S.partner.name = nm; S.partner.periods[UI.periodId] = { income: inc, items }; });
   }
 
+  function closedFixedLines(s) {
+    const out = [];
+    s.fixed.forEach((c) => {
+      if (c.closed && c.originalBudget > c.spent) out.push([c.name, c.name, c.originalBudget - c.spent]);
+      c.subs.forEach((x) => { if (x.closed && x.originalBudget > x.spent) out.push([c.name + '|' + x.name, c.name + ' › ' + x.name, x.originalBudget - x.spent]); });
+    });
+    if (!out.length) return '';
+    return '<div style="margin-top:8px;padding-top:6px;border-top:1px dashed var(--line)">' + out.map(([k, label, cents]) =>
+      '<div class="row-between sub" style="min-height:40px"><span>🚫 No se pagará: ' + esc(label) + ' (' + money(cents) + ')</span><button class="mini" data-a="reopen-key" data-v="' + esc(k) + '">Deshacer</button></div>').join('') + '</div>';
+  }
+  function closedVarLine(s) {
+    const cl = s.variable.filter((c) => c.closed && c.originalBudget > c.spent);
+    if (!cl.length) return '';
+    return '<div style="margin-top:8px">' + cl.map((c) => '<div class="row-between sub" style="min-height:40px"><span>🚫 Cerrada: ' + esc(c.name) + ' (no cuentan ' + money(c.originalBudget - c.spent) + ')</span><button class="mini" data-a="reopen-key" data-v="' + esc(c.name) + '">Deshacer</button></div>').join('') + '</div>';
+  }
   function alertsCard(s) {
     if (!s.alerts.length) return '';
     const dot = { r: '🔴', a: '🟠', g: '🟢' };
@@ -831,12 +849,32 @@
 
   // ───────────────────────── Hoja: editar movimiento ─────────────────────────
   function findEntry(id) { return L.all.find((e) => e.id === id); }
+  function openExplain(key) {
+    const s = summary();
+    const f = C.explainFigure(key, s, { balance: S.settings.balance, incomeEntries: entries().filter((e) => e.treatment === 'income') });
+    if (!f) return;
+    let body = '';
+    if (f.lines.length) {
+      body += '<div class="list">' + f.lines.map((l) => '<div class="li2"><span class="l">' + (l.op ? '<b style="display:inline-block;width:18px">' + esc(l.op) + '</b>' : '<span style="display:inline-block;width:18px"></span>') + esc(l.label) + '</span>' + (l.cents === null || l.cents === undefined ? '' : '<b class="amt">' + money(l.cents) + '</b>') + '</div>').join('') +
+        '<div class="li2" style="background:var(--surface2)"><span class="l"><b>= ' + esc(f.result.label) + '</b></span><b class="amt">' + money(f.result.cents) + '</b></div></div>';
+    } else body += '<div class="hero" style="margin:0"><div class="lbl">' + esc(f.result.label) + '</div><div class="big" style="font-size:34px">' + money(f.result.cents) + '</div></div>';
+    if (f.breakdown && f.breakdown.length) body += '<div class="set-h">Desglose</div><div class="list">' + f.breakdown.map((b) => '<div class="li2"><span class="l">' + esc(b.label) + (b.sub ? '<span class="sub" style="display:block">' + esc(b.sub) + '</span>' : '') + '</span><b class="amt">' + money(b.cents) + '</b></div>').join('') + '</div>';
+    if (f.top && f.top.length) body += '<div class="set-h">Movimientos más grandes</div><div class="list">' + f.top.map((e) => '<button class="li2" data-a="edit-entry" data-v="' + esc(e.id) + '"><span class="l">' + C.formatDateShort(e.date) + ' · ' + esc(e.description || e.category) + '</span><span class="r"><b class="amt">' + money(e.cents) + '</b> ›</span></button>').join('') + '</div>';
+    if (f.note) body += '<p class="note">' + esc(f.note) + '</p>';
+    openSheet('ⓘ ' + f.title, body);
+  }
+  function explainBlock(e) {
+    if (S.settings.explainOn === false) return '';
+    const ex = C.explainEntry(e, { movements: S.movements, matches: S.matches, decisions: S.decisions, catType: (c) => (S.categories[c] || {}).type, periodLabel: C.periodLabel(period(e.periodId)) });
+    return '<details class="explain"><summary>🔎 De dónde sale</summary>' + ex.steps.map((st) => '<div class="ex-step"><b>' + st.icon + ' ' + esc(st.title) + '</b>' + st.lines.map((l) => '<div>' + esc(l) + '</div>').join('') + '</div>').join('') + '</details>';
+  }
   function openEditEntry(id) {
     const e = findEntry(id); if (!e) return;
     UI.editTreat = e.treatment;
     const subs = [...new Set(L.all.filter((x) => x.category === e.category && x.subcategory).map((x) => x.subcategory))];
     let body = '<div class="origin' + (e.bankIds.length && !e.toshlIds.length ? ' bank' : '') + '"><div class="row-between"><b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.description || '(sin descripción)') + '</b>' + signedMoney(e) + '</div>' +
       '<div class="sub">' + C.formatDate(e.date) + ' · ' + (STATUS_PILL[e.status] || '') + (e.bankDescription && e.bankDescription !== e.description ? '<br>Banco: ' + esc(e.bankDescription) : '') + '</div>' + commentLine(e.comment) + '</div>';
+    body += explainBlock(e);
     body += '<div class="seg" id="treat-seg">' + ['expense', 'income', 'refund', 'excluded'].map((t) => '<button class="' + (e.treatment === t ? 'on' : '') + '" data-a="edit-treat" data-v="' + t + '">' + TREAT_LABEL[t] + '</button>').join('') + '</div>';
     body += '<label class="field"><span>Categoría</span><select class="select" id="ed-cat">' + catOptions(e.category, true) + '<option value="__new">+ Nueva categoría…</option></select></label>' +
       '<label class="field hidden" id="ed-new-wrap"><span>Nombre de la nueva categoría</span><input class="input" id="ed-new" autocomplete="off"></label>' +
@@ -883,9 +921,9 @@
     }
     if (info.from) h += '<button class="banner info" data-a="budget-copy">📋 <span class="grow">Usando el presupuesto de <b>' + esc(C.periodLabel(period(info.from))) + '</b>. Toca para guardarlo en este periodo.</span><span class="chev">›</span></button>';
     const t = (l, v, st) => '<div class="tile"><small>' + l + '</small><b' + (st ? ' style="' + st + '"' : '') + '>' + v + '</b></div>';
-    h += '<div class="sumgrid">' + t('Ingresos', money(s.income)) + t('Gastos', money(s.consumption)) + t('Ahorro / inversión', money(s.savings)) +
-      t('Saldo del periodo', money(s.balance, { sign: true }), 'color:var(' + (s.balance >= 0 ? '--ok' : '--bad') + ')') + t('Presupuesto', money(s.budgetTotal)) + t('Por pagar', money(s.pendingTotal), 'color:var(--warn)') + '</div>';
-    h += '<div class="sec-h"><b>Variables</b><span>' + money(s.varBudget) + ' · ' + (s.available >= 0 ? 'quedan ' + money(s.available) : 'pasado ' + money(-s.available)) + '</span></div>';
+    h += '<div class="sumgrid">' + t('Ingresos ' + infoBtn('income'), money(s.income)) + t('Gastos ' + infoBtn('spent'), money(s.consumption)) + t('Ahorro / inversión', money(s.savings)) +
+      t('Saldo del periodo ' + infoBtn('balance'), money(s.balance, { sign: true }), 'color:var(' + (s.balance >= 0 ? '--ok' : '--bad') + ')') + t('Presupuesto', money(s.budgetTotal)) + t('Por pagar ' + infoBtn('pending'), money(s.pendingTotal), 'color:var(--warn)') + '</div>';
+    h += '<div class="sec-h"><b>Variables ' + infoBtn('available') + '</b><span>' + money(s.varBudget) + ' · ' + (s.available >= 0 ? 'quedan ' + money(s.available) : 'pasado ' + money(-s.available)) + '</span></div>';
     h += '<div class="pace"><i></i> Ritmo esperado hoy: ' + s.elapsedPct + ' % (día ' + s.elapsed + ' de ' + s.totalDays + ')</div>';
     if (s.daysLeft <= 5 && s.available > 0) h += '<p class="note" style="margin:0 4px 10px">Final del periodo: si no vas a gastar lo que queda en alguna categoría, pulsa “Cerrar este periodo” en ella.</p>';
     s.variable.forEach((c) => { h += budCard(c, s); });
@@ -904,7 +942,7 @@
       const closedSubs = c.subs.filter((x) => x.closed).map((x) => x.name);
       const pillF = c.closed ? '<span class="pill mut">cerrado</span>' : pill;
       const extra = c.closed || closedSubs.length
-        ? '<button class="mini" data-a="reopen-cat" data-v="' + esc(c.name) + '">Reabrir' + (closedSubs.length && !c.closed ? ' ' + esc(closedSubs.join(', ')) : '') + '</button>'
+        ? '<button class="mini" data-a="reopen-cat" data-v="' + esc(c.name) + '">↩︎ Deshacer' + (closedSubs.length && !c.closed ? ' ' + esc(closedSubs.join(', ')) : '') + '</button>'
         : (pend.length ? '<button class="mini" data-a="close-item" data-v="' + esc(c.name) + '">No se pagará este periodo</button>' : '');
       h += '<div class="fixed"><button class="nm" style="text-align:left;flex:1;min-height:44px" data-a="cat-movs" data-v="' + esc(c.name) + '">' + catIcon(c.name) + ' ' + esc(c.name) +
         '<span class="sub">' + (c.closed ? money(c.spent) + ' pagado · lo que faltaba no se pagará' : detail) + '</span></button><span style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">' + pillF + extra + '</span></div>';
@@ -982,6 +1020,7 @@
     const subs = c.subs.filter((x) => x.name);
     if (subs.length) h += '<div class="subcats">' + subs.map((x) => esc(x.name) + (x.alias ? ' (' + esc(x.alias) + ')' : '') + ' ' + money(x.spent, { plain: true }) + (x.budget ? '/' + money(x.budget, { plain: true }) : '')).join(' · ') + '</div>';
     h += '</button>';
+    if (c.closed) h += '<button class="mini" data-a="reopen-key" data-v="' + esc(c.name) + '">↩︎ Deshacer cierre</button>';
     if (!open && !c.closed && c.originalBudget > c.spent && c.spent >= 0 && s.daysLeft <= 5) {
       h += '<button class="mini" data-a="close-item" data-v="' + esc(c.name) + '">Cerrar este periodo (quedan ' + money(c.originalBudget - c.spent) + ')</button>';
     }
@@ -989,7 +1028,8 @@
       const list = c.entries.slice().sort((a, b) => (a.date < b.date ? 1 : -1));
       h += '<div class="detail">' + list.slice(0, 6).map((e) => '<div class="li"><span>' + C.formatDateShort(e.date) + '</span><span>' + (e.treatment === 'refund' ? '↩︎ ' : '') + esc(e.description) + '</span>' + signedMoney(e) + '</div>').join('') +
         '<button class="link" data-a="cat-movs" data-v="' + esc(c.name) + '">Ver ' + (list.length > 6 ? 'los ' + list.length : 'todos') + ' en Movimientos ›</button>' +
-        (c.closed ? '<button class="mini" data-a="reopen-cat" data-v="' + esc(c.name) + '">Reabrir categoría este periodo</button>'
+        (S.settings.explainOn !== false ? '<button class="mini" style="display:block" data-a="explain" data-v="cat:' + esc(c.name) + '">ⓘ Cómo se calcula</button>' : '') +
+        (c.closed ? ''
           : (c.originalBudget > c.spent ? '<button class="mini" data-a="close-item" data-v="' + esc(c.name) + '">Cerrar este periodo (no gastaré más aquí)</button>' : '')) + '</div>';
     }
     return h + '</div>';
@@ -1055,6 +1095,7 @@
     const last = s.lastBackupAt ? C.formatDate(C.todayISO(new Date(s.lastBackupAt))) : 'nunca';
     let h = '<div class="set-h">Saldo del banco (opcional)</div><div class="list">' +
       '<button class="li2" data-a="balance-sheet"><span class="l">💶 Saldo actual</span><span class="r">' + (s.balance ? money(s.balance.cents) + ' · ' + C.formatDateShort(s.balance.date) : 'Añadir') + ' <span class="chev">›</span></span></button></div>';
+    h += '<div class="set-h">Explicaciones</div><div class="list"><label class="li2"><span class="l">ⓘ Cómo se calcula y 🔎 De dónde sale</span><input type="checkbox" class="switch" data-c="set-toggle" data-v="explainOn"' + (S.settings.explainOn !== false ? ' checked' : '') + '></label></div>';
     if (S.savingsPin) h += '<div class="set-h">Ahorros</div><div class="list"><button class="li2" data-a="pin-change"><span class="l">🔒 Cambiar PIN de Ahorros</span><span class="chev">›</span></button></div>';
     h += '<div class="set-h">Periodo</div><div class="list">' +
       '<label class="li2"><span class="l">Día de inicio</span><input class="num-input" type="number" inputmode="numeric" min="1" max="28" value="' + s.startDay + '" data-c="set-startday"></label>' +
@@ -1271,6 +1312,10 @@
         S.budgets[id].closed = Object.assign({}, S.budgets[id].closed || {}, { [v]: true });
       });
     },
+    'explain': (v) => { closeSheet(); openExplain(v); },
+    'reopen-key': (v) => mutate('Deshecho: ' + v.replace('|', ' › ') + ' vuelve a contar', () => {
+      const b = S.budgets[UI.periodId]; if (b && b.closed) delete b.closed[v];
+    }),
     'reopen-cat': (v) => mutate(v + ' reabierta', () => {
       const b = S.budgets[UI.periodId]; if (!b || !b.closed) return;
       Object.keys(b.closed).forEach((k) => { if (k === v || k.startsWith(v + '|')) delete b.closed[k]; });
