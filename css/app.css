@@ -146,7 +146,7 @@ select.chip.on { background-color: var(--text); }
 .summary-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 4px; }
 .mv { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; margin-bottom: 8px; }
 .mv .top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
-.mv .desc { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv .desc { font-weight: 600; font-size: 14px; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
 .mv .top > div:first-child { min-width: 0; }
 .mv .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .pair { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; font-size: 13px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
@@ -163,6 +163,7 @@ select.chip.on { background-color: var(--text); }
 .suggest .t b { color: var(--accent); }
 .suggest .btn { min-height: 44px; width: 52px; padding: 0; }
 .mv .chips { margin-top: 8px; }
+.comment { font-size: 13px; margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: var(--surface2); color: var(--text); overflow-wrap: anywhere; }
 .resolved-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
 .inline-select { min-height: 40px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); padding: 0 8px; max-width: 100%; }
 

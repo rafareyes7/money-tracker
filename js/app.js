@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.2.1';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -14,6 +14,8 @@
     return '<span class="amt' + (v > 0 ? ' pos' : '') + '">' + money(v, { sign: true }) + '</span>';
   };
   const clone = (x) => JSON.parse(JSON.stringify(x));
+  /** Comentario del banco (p. ej. el mensaje de un Bizum). */
+  const commentLine = (txt) => (txt ? '<div class="comment">💬 ' + esc(txt) + '</div>' : '');
   const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
   const capital = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -395,7 +397,7 @@
         if (f.source === 'bank' && !hb) return false; if (f.source === 'toshl' && !ht) return false; if (f.source === 'both' && !(hb && ht)) return false;
       }
       if (q) {
-        const hay = C.normText([e.description, e.bankDescription, e.category, e.subcategory, money(e.cents, { plain: true })].join(' '));
+        const hay = C.normText([e.description, e.bankDescription, e.comment, e.category, e.subcategory, money(e.cents, { plain: true })].join(' '));
         if (!q.split(' ').every((w) => hay.includes(w))) return false;
       }
       return true;
@@ -411,7 +413,7 @@
     if (!list.length) { el.innerHTML = h + '<p class="empty muted">No hay movimientos con estos filtros.</p>'; return; }
     const shown = list.slice(0, f.limit);
     const row = (e) => '<button class="tx' + (e.treatment === 'excluded' ? ' excluded' : '') + '" data-a="edit-entry" data-v="' + esc(e.id) + '"><span class="ico">' + (e.treatment === 'refund' ? '↩︎' : catIcon(e.category)) + '</span>' +
-      '<span class="m"><span class="t" style="display:block">' + esc(e.description || '(sin descripción)') + '</span><span class="c"><span class="cat">' + esc(e.category || 'Sin categoría') + (e.subcategory ? ' › ' + esc(e.subcategory) : '') +
+      '<span class="m"><span class="t" style="display:block">' + esc(e.description || '(sin descripción)') + '</span>' + (e.comment ? '<span class="c" style="display:block;overflow:hidden;text-overflow:ellipsis">💬 ' + esc(e.comment) + '</span>' : '') + '<span class="c"><span class="cat">' + esc(e.category || 'Sin categoría') + (e.subcategory ? ' › ' + esc(e.subcategory) : '') +
       (e.treatment === 'refund' ? ' · reembolso' : '') + '</span>' + (STATUS_PILL[e.status] || '') + (!e.resolved && e.status !== 'possible' ? '<span class="pill mut">sin revisar</span>' : '') + '</span></span>' + signedMoney(e) + '</button>';
     if (f.sort === 'date') {
       const days = {}; const order = [];
@@ -447,7 +449,7 @@
     const el = $('#conc-list'); if (!el) return;
     const c = UI.conc; const q = C.normText(c.q);
     let E = entries();
-    if (q) E = E.filter((e) => { const hay = C.normText([e.description, e.bankDescription, e.category, e.subcategory, money(e.cents, { plain: true })].join(' ')); return q.split(' ').every((w) => hay.includes(w)); });
+    if (q) E = E.filter((e) => { const hay = C.normText([e.description, e.bankDescription, e.comment, e.category, e.subcategory, money(e.cents, { plain: true })].join(' ')); return q.split(' ').every((w) => hay.includes(w)); });
     const g = concGroups(E);
     const sections = {
       pending: [['⚠️ Posibles', g.possible], ['🏦 Solo en banco', g.bank.filter((e) => !e.resolved)], ['📱 Solo en Toshl', g.toshl.filter((e) => !e.resolved)]],
@@ -475,11 +477,12 @@
     }
     el.innerHTML = h;
   }
-  function mvLine(id, sideLabel) {
+  function mvLine(id) {
     const m = S.movements[id]; if (!m) return '';
     const isB = m.source === 'bank';
+    const cm = isB && m.comment ? '<span class="comment" style="grid-column:1 / -1;margin:0 0 2px 0">💬 ' + esc(m.comment) + '</span>' : '';
     return '<span class="l"><span class="pill ' + (isB ? 'bank' : 'toshl') + '">' + (isB ? 'Banco' : 'Toshl') + '</span><span>' + C.formatDateShort(m.date) + ' · ' +
-      esc(isB ? m.description : [m.category, m.subcategory].filter(Boolean).join(' › ') + (m.description ? ' · ' + m.description : '')) + '</span></span><span class="amt">' + money(m.cents) + '</span>';
+      esc(isB ? m.description : [m.category, m.subcategory].filter(Boolean).join(' › ') + (m.description ? ' · ' + m.description : '')) + '</span></span><span class="amt">' + money(m.cents) + '</span>' + cm;
   }
   function possibleCard(e) {
     const m = S.matches[e.matchId];
@@ -503,7 +506,7 @@
     return '<option value="">Elige categoría…</option>' + cats.map((c) => '<option value="' + esc(c) + '"' + (c === selected ? ' selected' : '') + '>' + esc(catIcon(c) + ' ' + c) + '</option>').join('');
   }
   function bankCard(e) {
-    const head = '<div class="top"><div><div class="desc">' + esc(e.description) + '</div><div class="meta">' + C.formatDateShort(e.date) + (e.bankCategory ? ' · Banco: ' + esc(e.bankCategory) : '') + '</div></div>' + signedMoney(e) + '</div>';
+    const head = '<div class="top"><div><div class="desc">' + esc(e.description) + '</div><div class="meta">' + C.formatDateShort(e.date) + (e.bankCategory ? ' · Banco: ' + esc(e.bankCategory) : '') + '</div></div>' + signedMoney(e) + '</div>' + commentLine(e.comment);
     if (e.resolved) {
       return '<div class="mv">' + head + '<div class="resolved-line"><span>' + (e.treatment === 'excluded' ? '🚫 Excluido' : '→ ' + esc(TREAT_LABEL[e.treatment]) + (e.category ? ' · <b>' + esc(e.category) + '</b>' : '') + (e.subcategory ? ' › ' + esc(e.subcategory) : '')) +
         '</span><button class="btn plain sm" data-a="edit-entry" data-v="' + esc(e.id) + '">Cambiar</button></div></div>';
@@ -538,7 +541,7 @@
   function matchedCard(e) {
     const days = e.bankDate && e.bankDate !== e.date ? ' (' + (C.diffDays(e.date, e.bankDate) > 0 ? '+' : '') + C.diffDays(e.date, e.bankDate) + ' d)' : '';
     return '<button class="mv" style="width:100%;text-align:left;display:block" data-a="edit-entry" data-v="' + esc(e.id) + '"><div class="top"><div><div class="desc">' + esc(e.description) + ' · ' + esc(e.category) + (e.subcategory ? ' › ' + esc(e.subcategory) : '') + '</div>' +
-      '<div class="meta">Toshl ' + C.formatDateShort(e.date) + ' ↔ Banco ' + C.formatDateShort(e.bankDate) + days + ' · ' + esc(e.bankDescription) + '</div></div>' + signedMoney(e) + '</div></button>';
+      '<div class="meta">Toshl ' + C.formatDateShort(e.date) + ' ↔ Banco ' + C.formatDateShort(e.bankDate) + days + ' · ' + esc(e.bankDescription) + '</div></div>' + signedMoney(e) + '</div>' + commentLine(e.comment) + '</button>';
   }
 
   // ───────────────────────── Importar ─────────────────────────
@@ -652,7 +655,7 @@
     const q = C.normText(k.q);
     return Object.values(S.movements).filter((m) => m.source === k.otherSide && !used.has(m.id) && Math.sign(m.cents) === Math.sign(sum))
       .filter((m) => k.sel.has(m.id) || (k.filter === 'near' ? Math.abs(C.diffDays(date, m.date)) <= 7 : k.filter === 'amount' ? Math.abs(m.cents - sum) <= Math.max(100, Math.abs(sum) * 0.1) : Math.abs(C.diffDays(date, m.date)) <= 45))
-      .filter((m) => !q || C.normText([m.description, m.category, m.subcategory, money(m.cents, { plain: true })].join(' ')).includes(q))
+      .filter((m) => !q || C.normText([m.description, m.comment, m.category, m.subcategory, money(m.cents, { plain: true })].join(' ')).includes(q))
       .map((m) => ({ m, score: Math.abs(C.diffDays(date, m.date)) + Math.abs(m.cents - sum) / 100 - C.similarity(m.description, anchor[0].description) * 3 }))
       .sort((a, b) => (k.sel.has(b.m.id) - k.sel.has(a.m.id)) || a.score - b.score).slice(0, 80).map((x) => x.m);
   }
@@ -663,7 +666,7 @@
     const list = linkCandidates();
     $('#link-list').innerHTML = list.length ? list.map((m) => '<button class="cand" data-a="link-toggle" data-v="' + esc(m.id) + '"><span class="ck' + (k.sel.has(m.id) ? ' on' : '') + '">' + (k.sel.has(m.id) ? '✓' : '') + '</span>' +
       '<span class="m"><span class="t" style="display:block">' + esc(m.description || m.category) + '</span><span class="c">' + C.formatDate(m.date) + ' · ' + (C.diffDays(S.movements[k.anchorIds[0]].date, m.date) >= 0 ? '+' : '') + C.diffDays(S.movements[k.anchorIds[0]].date, m.date) + ' días' +
-      (m.source === 'toshl' ? ' · ' + esc(m.category) : '') + '</span></span><span class="amt">' + money(m.cents) + '</span></button>').join('')
+      (m.source === 'toshl' ? ' · ' + esc(m.category) : '') + (m.comment ? ' · 💬 ' + esc(m.comment) : '') + '</span></span><span class="amt">' + money(m.cents) + '</span></button>').join('')
       : '<p class="empty muted">No hay movimientos libres aquí. Prueba “Más fechas” o busca.</p>';
     const selSum = [...k.sel].reduce((s, id) => s + (S.movements[id] ? S.movements[id].cents : 0), 0);
     const diff = selSum - anchorSum;
@@ -703,7 +706,7 @@
     UI.editTreat = e.treatment;
     const subs = [...new Set(L.all.filter((x) => x.category === e.category && x.subcategory).map((x) => x.subcategory))];
     let body = '<div class="origin' + (e.bankIds.length && !e.toshlIds.length ? ' bank' : '') + '"><div class="row-between"><b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.description || '(sin descripción)') + '</b>' + signedMoney(e) + '</div>' +
-      '<div class="sub">' + C.formatDate(e.date) + ' · ' + (STATUS_PILL[e.status] || '') + (e.bankDescription && e.bankDescription !== e.description ? '<br>Banco: ' + esc(e.bankDescription) : '') + '</div></div>';
+      '<div class="sub">' + C.formatDate(e.date) + ' · ' + (STATUS_PILL[e.status] || '') + (e.bankDescription && e.bankDescription !== e.description ? '<br>Banco: ' + esc(e.bankDescription) : '') + '</div>' + commentLine(e.comment) + '</div>';
     body += '<div class="seg" id="treat-seg">' + ['expense', 'income', 'refund', 'excluded'].map((t) => '<button class="' + (e.treatment === t ? 'on' : '') + '" data-a="edit-treat" data-v="' + t + '">' + TREAT_LABEL[t] + '</button>').join('') + '</div>';
     body += '<label class="field"><span>Categoría</span><select class="select" id="ed-cat">' + catOptions(e.category, true) + '<option value="__new">+ Nueva categoría…</option></select></label>' +
       '<label class="field hidden" id="ed-new-wrap"><span>Nombre de la nueva categoría</span><input class="input" id="ed-new" autocomplete="off"></label>' +

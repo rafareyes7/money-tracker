@@ -558,6 +558,7 @@
       ts.forEach((t) => used.add(t.id)); bs.forEach((b) => used.add(b.id));
       const status = m.status === 'possible' ? 'possible' : 'matched';
       const bankDesc = bs.map((b) => b.description).join(' + ');
+      const bankComment = bs.map((b) => b.comment).filter(Boolean).join(' · ');
       const bankSum = bs.reduce((s, b) => s + b.cents, 0);
       ts.forEach((t, i) => {
         const id = ts.length === 1 ? 'm:' + m.id : 'm:' + m.id + ':' + i;
@@ -566,7 +567,7 @@
           id, matchId: m.id, date: t.date, bankDate: bs[0].date, cents: Math.abs(signed), sign: Math.sign(signed),
           treatment: signed > 0 ? 'income' : 'expense',
           category: t.category, subcategory: t.subcategory || '',
-          description: t.description || bs[0].description, bankDescription: bankDesc,
+          description: t.description || bs[0].description, bankDescription: bankDesc, comment: bankComment,
           toshlCents: ts.reduce((s, x) => s + x.cents, 0), bankCents: bankSum,
           status, resolved: status === 'matched', reason: m.reason || '', account: t.account || '',
           toshlIds: m.toshlIds.slice(), bankIds: m.bankIds.slice(),
@@ -576,11 +577,11 @@
     Object.values(mv).forEach((x) => {
       if (used.has(x.id)) return;
       if (x.source === 'bank') {
-        const sug = suggestForBank(x, state.rules, known);
+        const sug = suggestForBank(x.comment ? Object.assign({}, x, { description: x.description + ' ' + x.comment }) : x, state.rules, known);
         out.push({
           id: 'b:' + x.id, date: x.date, bankDate: x.date, cents: Math.abs(x.cents), sign: Math.sign(x.cents),
           treatment: sug.treatment, category: sug.category, subcategory: sug.subcategory,
-          description: x.description, bankDescription: x.description, bankCategory: x.bankCategory,
+          description: x.description, bankDescription: x.description, bankCategory: x.bankCategory, comment: x.comment || '',
           status: 'bank_only', resolved: false, suggestion: sug, toshlIds: [], bankIds: [x.id],
         });
       } else {

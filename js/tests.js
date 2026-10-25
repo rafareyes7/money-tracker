@@ -204,6 +204,15 @@
     eq(h.cats.find((c) => c.name === 'Groceries').total, 50000); ok(h.cats.some((c) => c.name === 'Gimnasio'));
     eq(h.balance.total, 500000 - 174000);
   });
+  test('El comentario del banco (ej. mensaje de Bizum) llega al libro', () => {
+    const b = { source: 'bank', id: 'b1', date: '2026-10-12', cents: 1500, description: 'Bizum recibido de MARTA G', comment: 'cena viernes' };
+    const t = { source: 'toshl', id: 't1', date: '2026-10-09', cents: -4000, description: 'Cena', category: 'Eating out' };
+    const led = C.buildLedger({ movements: { b1: b, t1: t }, matches: {}, decisions: {}, rules: C.DEFAULT_RULES, knownCats: ['Eating out'] });
+    eq(led.find((e) => e.id === 'b:b1').comment, 'cena viernes');
+    const m = { x: { id: 'x', toshlIds: ['t1'], bankIds: ['b2'], status: 'auto' } };
+    const led2 = C.buildLedger({ movements: { t1: t, b2: { source: 'bank', id: 'b2', date: '2026-10-09', cents: -4000, description: 'Pago en BAR', comment: 'con amigos' } }, matches: m, decisions: {}, rules: [] });
+    eq(led2[0].comment, 'con amigos');
+  });
   test('Día de pago deducido del historial', () => {
     const d = C.inferDueDays([{ category: 'Rent', treatment: 'expense', date: '2026-10-01' }, { category: 'House Services', subcategory: 'agua', treatment: 'expense', date: '2026-10-05' }], ['Rent', 'House Services']);
     eq(d.Rent, 1); eq(d['House Services|agua'], 5);
