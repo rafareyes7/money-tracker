@@ -168,6 +168,16 @@ select.chip.on { background-color: var(--text); }
 .explain summary { min-height: 44px; display: flex; align-items: center; font-weight: 600; cursor: pointer; }
 .ex-step { font-size: 13px; padding: 8px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 .ex-step b { display: block; margin-bottom: 2px; }
+.outlook h3 { margin-bottom: 6px; }
+.ol-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 15px; }
+.ol-row:first-of-type { border-top: 0; }
+.ol-row .op { width: 14px; font-weight: 700; color: var(--muted); }
+.ol-row .lb { flex: 1; min-width: 0; }
+.ol-row .lb small { display: block; color: var(--muted); font-size: 12px; }
+.ol-row.strong { border-top: 2px solid var(--text); }
+.ol-row.strong .lb, .ol-row.strong .amt { font-weight: 800; font-size: 17px; }
+.ol-save { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 10px; background: var(--ok-soft); border-radius: 12px; padding: 10px 12px; font-weight: 600; }
+.ol-save b { font-size: 22px; font-variant-numeric: tabular-nums; }
 .mini { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 0; color: var(--accent); font-size: 13px; font-weight: 600; }
 .comment { font-size: 13px; margin-top: 6px; padding: 6px 10px; border-radius: 8px; background: var(--surface2); color: var(--text); overflow-wrap: anywhere; }
 .resolved-line { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }

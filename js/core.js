@@ -750,7 +750,18 @@
     const available = varBudget - varSpent;
     const perDay = daysLeft > 0 ? Math.round(Math.max(0, available) / daysLeft) : null;
     const margin = income - spentTotal - pendingTotal - Math.max(0, available);
-    const varProjected = elapsed >= totalDays ? varSpent : elapsed > 0 ? Math.max(varSpent, Math.round((varSpent * totalDays) / elapsed)) : varBudget;
+    // Ritmo actual por categoría: los gastos grandes y únicos (más de 50 € y 3× la mediana) cuentan una vez, no se extrapolan.
+    const projectCat = (c) => {
+      if (elapsed >= totalDays) return c.spent;
+      if (elapsed <= 0) return Math.max(c.spent, c.budget);
+      const ex = c.entries.filter((e) => e.treatment === 'expense').map((e) => e.cents).sort((a, b) => a - b);
+      const med = ex.length ? ex[Math.floor((ex.length - 1) / 2)] : 0; // mediana inferior: robusta con pocos datos
+      const limit = Math.max(5000, med * 3);
+      const oneOff = ex.length > 1 ? ex.filter((v) => v > limit).reduce((a, v) => a + v, 0) : 0;
+      const regular = c.spent - oneOff;
+      return Math.max(c.spent, Math.round(c.spent + (Math.max(0, regular) / elapsed) * (totalDays - elapsed)));
+    };
+    const varProjected = variable.reduce((a, c) => a + projectCat(c), 0);
     const closing = income - fixedSpent - pendingTotal - varProjected;
 
     const alerts = [];
@@ -784,6 +795,24 @@
       ifBudget: balanceCents - s.pendingTotal - restBudget,
       atPace: balanceCents - s.pendingTotal - restPace,
     };
+  }
+
+  /**
+   * Resumen directo del periodo: con el saldo del banco (si lo hay), lo gastado, lo que falta del presupuesto
+   * y lo que ahorrarás. Todas las cifras salen de summarize().
+   */
+  function periodOutlook(s, balance) {
+    const restBudget = Math.max(0, s.available);
+    const toSpend = s.pendingTotal + restBudget;              // lo que aún falta gastar del presupuesto
+    const out = {
+      income: s.income, spent: s.spentTotal, pending: s.pendingTotal, restBudget, toSpend,
+      expectedTotal: s.spentTotal + toSpend,                 // gasto total del periodo si cumples el presupuesto
+      savings: s.income - s.spentTotal - toSpend,            // lo que ahorras de los ingresos del periodo
+      overBudget: Math.max(0, -s.available),
+      balance: null, endBalance: null,
+    };
+    if (balance && Number.isFinite(balance.cents)) { out.balance = balance; out.endBalance = balance.cents - toSpend; }
+    return out;
   }
 
   /**
@@ -1038,7 +1067,7 @@
     matchMovements, pairKey, matchId,
     DEFAULT_RULES, suggestForBank, learnRule,
     buildLedger, isPending,
-    colorFor, matchSubNames, inferDueDays, summarize, projectBalance, buildHistory, householdSummary, savingsSummary, explainEntry, explainFigure,
+    colorFor, matchSubNames, inferDueDays, summarize, projectBalance, periodOutlook, buildHistory, householdSummary, savingsSummary, explainEntry, explainFigure,
     TOSHL_HEADER, toToshlCSV, toLedgerJSON, fromV2Profiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;

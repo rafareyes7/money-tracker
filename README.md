@@ -80,6 +80,8 @@ No se guarda número de cuenta ni titular: las filas anteriores a la cabecera de
 
 **v1.7 · Presupuesto distinto por mes:** *Presupuesto → 📋 Duplicar a otro mes* copia el presupuesto al mes elegido y abre el editor de ese mes (total en vivo, diferencia con el mes anterior, “antes: X” por categoría y “Quitar de este mes”). Un mes sin presupuesto propio usa el último anterior que lo tenga.
 
+**v1.8 · Resumen claro y previsión más realista:** tarjeta "🧭 Tu periodo, claro" en Inicio: saldo del banco − falta por pagar − te queda por gastar = con cuánto acabas, y "este periodo ahorrarás" = ingresos − gasto total previsto. La previsión "al ritmo actual" ya no multiplica gastos grandes y únicos (más de 50 € y más de 3× la mediana de su categoría): cuentan una sola vez.
+
 ## 6. Riesgos y cómo están resueltos
 
 | Riesgo | Solución |

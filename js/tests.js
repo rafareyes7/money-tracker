@@ -277,6 +277,18 @@
     eq(f.lines.map((l) => l.cents), [60000, 35000]); eq(f.result.cents, 25000);
     const g = C.explainFigure('spent', s); eq(g.breakdown[0].label, 'Groceries'); eq(g.top[0].cents, 30000);
   });
+  test('Ritmo actual: un gasto grande y único no se multiplica', () => {
+    const P = C.getPeriod('2026-10'); // 26/10 – 24/11 (30 días)
+    const E = (id, cents) => ({ id, date: '2026-10-27', cents, treatment: 'expense', category: 'Extra' });
+    const s = C.summarize([E('a', 500), E('b', 700), E('c', 27380), E('d', 44289)], { cats: { Extra: { cents: 20000 } } }, {}, P, '2026-11-01');
+    // 7 días: regular = 12 € → 12 + 12/7×23 ≈ 51,43 €; más los dos únicos (717,69 €)
+    eq(s.varProjected, 1200 + 27380 + 44289 + Math.round((1200 / 7) * 23));
+  });
+  test('Resumen directo: saldo, gastado, falta y ahorro', () => {
+    const o = C.periodOutlook({ income: 516637, spentTotal: 100719, pendingTotal: 191538, available: 14543 }, { cents: 522657, date: '2026-11-01' });
+    eq(o.endBalance, 522657 - 191538 - 14543); eq(o.savings, 516637 - 100719 - 191538 - 14543); eq(o.expectedTotal, 100719 + 191538 + 14543);
+    eq(C.periodOutlook({ income: 0, spentTotal: 0, pendingTotal: 0, available: -500 }, null).overBudget, 500);
+  });
   test('Día de pago deducido del historial', () => {
     const d = C.inferDueDays([{ category: 'Rent', treatment: 'expense', date: '2026-10-01' }, { category: 'House Services', subcategory: 'agua', treatment: 'expense', date: '2026-10-05' }], ['Rent', 'House Services']);
     eq(d.Rent, 1); eq(d['House Services|agua'], 5);
