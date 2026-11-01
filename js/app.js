@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.8.0';
+  const APP_VERSION = '1.8.1';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -490,7 +490,14 @@
 
   /** Resumen directo: saldo del banco → lo que falta → con cuánto acabas, y cuánto ahorras este periodo. */
   function outlookCard(s, pend) {
-    const b = S.settings.balance; const o = C.periodOutlook(s, b);
+    const b = S.settings.balance; const p = period();
+    // Movimientos del banco desde el inicio del periodo hasta la fecha del saldo (todos, también los excluidos).
+    let bankNet = null, lastBank = '';
+    if (b && b.date >= p.start) {
+      bankNet = 0;
+      Object.values(S.movements).forEach((m) => { if (m.source === 'bank') { if (m.date >= p.start && m.date <= b.date) bankNet += m.cents; if (m.date > lastBank) lastBank = m.date; } });
+    }
+    const o = C.periodOutlook(s, b, bankNet);
     const row = (sign, label, cents, sub, strong) => '<div class="ol-row' + (strong ? ' strong' : '') + '"><span class="op">' + sign + '</span><span class="lb">' + label + (sub ? '<small>' + sub + '</small>' : '') + '</span><b class="amt">' + money(cents) + '</b></div>';
     let h = '<div class="card outlook"><h3>🧭 Tu periodo, claro</h3>';
     if (o.balance) {
@@ -499,6 +506,13 @@
         row('−', 'Falta por pagar (fijos)', o.pending, '') +
         row('−', 'Te queda por gastar (día a día)', o.restBudget, '') +
         row('=', 'Te quedará en el banco', o.endBalance, 'al final del periodo, si cumples el presupuesto', true);
+      if (Number.isFinite(o.opening)) {
+        h += '<div class="ol-split"><div class="sub" style="font-weight:600;margin-bottom:2px">¿De dónde salen esos ' + money(o.endBalance) + '?</div>' +
+          row('', 'Ya tenías al empezar el periodo', o.opening, 'el ' + C.formatDateShort(p.start) + ': dinero de meses anteriores') +
+          row('+', 'Ahorras este periodo', o.savings, 'ingresos − gasto total previsto') +
+          (o.other ? row(o.other >= 0 ? '+' : '−', 'Otros movimientos del banco', Math.abs(o.other), 'traspasos excluidos, Bizum sin clasificar, efectivo de Toshl…') : '') + '</div>';
+        if (b.source === 'manual' && lastBank && lastBank < b.date) h += '<p class="sub" style="color:var(--warn)">Aproximado: escribiste el saldo a mano el ' + C.formatDateShort(b.date) + ' y el último movimiento importado del banco es del ' + C.formatDateShort(lastBank) + '.</p>';
+      }
       if (lastMov && o.balance.date < lastMov) h += '<p class="sub" style="color:var(--warn)">El saldo es del ' + C.formatDateShort(o.balance.date) + ' y hay movimientos posteriores: actualízalo importando el banco o en Ajustes.</p>';
     } else {
       h += row('', 'Ingresos del periodo', o.income, '') + row('−', 'Ya gastado', o.spent, '') + row('−', 'Falta por pagar (fijos)', o.pending, '') + row('−', 'Te queda por gastar (día a día)', o.restBudget, '');

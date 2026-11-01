@@ -801,7 +801,7 @@
    * Resumen directo del periodo: con el saldo del banco (si lo hay), lo gastado, lo que falta del presupuesto
    * y lo que ahorrarás. Todas las cifras salen de summarize().
    */
-  function periodOutlook(s, balance) {
+  function periodOutlook(s, balance, bankNetSinceStart) {
     const restBudget = Math.max(0, s.available);
     const toSpend = s.pendingTotal + restBudget;              // lo que aún falta gastar del presupuesto
     const out = {
@@ -811,7 +811,14 @@
       overBudget: Math.max(0, -s.available),
       balance: null, endBalance: null,
     };
-    if (balance && Number.isFinite(balance.cents)) { out.balance = balance; out.endBalance = balance.cents - toSpend; }
+    if (balance && Number.isFinite(balance.cents)) {
+      out.balance = balance; out.endBalance = balance.cents - toSpend;
+      // Saldo al empezar el periodo = saldo de hoy − lo que se movió en el banco desde el inicio (dinero de meses anteriores).
+      if (Number.isFinite(bankNetSinceStart)) {
+        out.opening = balance.cents - bankNetSinceStart;
+        out.other = out.endBalance - out.opening - out.savings; // traspasos excluidos, efectivo, reembolsos sin clasificar…
+      }
+    }
     return out;
   }
 

@@ -176,6 +176,8 @@ select.chip.on { background-color: var(--text); }
 .ol-row .lb small { display: block; color: var(--muted); font-size: 12px; }
 .ol-row.strong { border-top: 2px solid var(--text); }
 .ol-row.strong .lb, .ol-row.strong .amt { font-weight: 800; font-size: 17px; }
+.ol-split { margin-top: 10px; background: var(--surface2); border-radius: 12px; padding: 8px 12px; }
+.ol-split .ol-row { border-color: color-mix(in srgb, var(--line) 70%, transparent); }
 .ol-save { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-top: 10px; background: var(--ok-soft); border-radius: 12px; padding: 10px 12px; font-weight: 600; }
 .ol-save b { font-size: 22px; font-variant-numeric: tabular-nums; }
 .mini { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 0; color: var(--accent); font-size: 13px; font-weight: 600; }

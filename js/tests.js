@@ -288,6 +288,9 @@
     const o = C.periodOutlook({ income: 516637, spentTotal: 100719, pendingTotal: 191538, available: 14543 }, { cents: 522657, date: '2026-11-01' });
     eq(o.endBalance, 522657 - 191538 - 14543); eq(o.savings, 516637 - 100719 - 191538 - 14543); eq(o.expectedTotal, 100719 + 191538 + 14543);
     eq(C.periodOutlook({ income: 0, spentTotal: 0, pendingTotal: 0, available: -500 }, null).overBudget, 500);
+    // Saldo hoy 5.000 € tras moverse +1.500 € en el banco desde el inicio → ya tenías 3.500 €.
+    const o2 = C.periodOutlook({ income: 300000, spentTotal: 100000, pendingTotal: 50000, available: 20000 }, { cents: 500000, date: '2026-11-01' }, 150000);
+    eq(o2.opening, 350000); eq(o2.savings, 130000); eq(o2.endBalance, 430000); eq(o2.opening + o2.savings + o2.other, o2.endBalance); eq(o2.other, -50000);
   });
   test('Día de pago deducido del historial', () => {
     const d = C.inferDueDays([{ category: 'Rent', treatment: 'expense', date: '2026-10-01' }, { category: 'House Services', subcategory: 'agua', treatment: 'expense', date: '2026-10-05' }], ['Rent', 'House Services']);
