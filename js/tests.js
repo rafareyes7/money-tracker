@@ -309,6 +309,55 @@
   });
 
   // ─── Salida ───
+  // ─── v1.9 ───
+  const P9 = { start: '2026-10-26', end: '2026-11-24' };
+  const X = (id, cat, sub, cents, date, extra) => Object.assign({ id, date, cents, treatment: 'expense', category: cat, subcategory: sub }, extra || {});
+  test('Recibo pagado con etiqueta en otro idioma no queda por pagar (water ↔ agua)', () => {
+    eq(C.matchSubNames(['water', 'electricity'], ['agua', 'luz']), { water: 'agua', electricity: 'luz' });
+    eq(C.matchSubNames(['gas'], ['gasolina']), {}, 'gas no es gasolina');
+    const budget = { cats: { 'House Services': { cents: 25000, subs: { water: 9000, electricity: 8000, internet: 5000 } } } };
+    const meta = { 'House Services': { type: 'fixed' } };
+    const s = C.summarize([X('a', 'House Services', 'agua', 19286, '2026-11-05')], budget, meta, P9, '2026-11-09');
+    ok(!s.pending.some((p) => p.sub === 'water'), 'water pagado');
+    eq(s.pending.find((p) => p.sub === 'electricity').cents, 8000, 'la luz sigue pendiente entera, aunque el agua se pasó');
+  });
+  test('Recibo sin etiqueta: la subcategoría se deduce del comercio', () => {
+    const budget = { cats: { 'House Services': { cents: 20000, subs: { water: 9000, internet: 5000 } } } };
+    const s = C.summarize([X('a', 'House Services', '', 19286, '2026-11-05', { description: 'Recibo AIGÜES DE BARCELONA' })], budget, { 'House Services': { type: 'fixed' } }, P9, '2026-11-09');
+    eq(s.cats[0].subs.find((x) => x.name === 'water').spent, 19286);
+    ok(!s.pending.some((p) => p.sub === 'water'));
+  });
+  test('Fecha esperada del recibo según cobros anteriores (mensual y bimensual)', () => {
+    const hist = [
+      X('w1', 'House Services', 'agua', 18000, '2026-07-06'), X('w2', 'House Services', 'agua', 19000, '2026-09-05'), X('w3', 'House Services', 'agua', 19286, '2026-11-05'),
+      X('e1', 'House Services', 'luz', 7000, '2026-09-14'), X('e2', 'House Services', 'luz', 7200, '2026-10-14'),
+      X('g1', 'Groceries', '', 3000, '2026-10-02'), X('g2', 'Groceries', '', 4000, '2026-10-05'), X('g3', 'Groceries', '', 2000, '2026-10-09'), X('g4', 'Groceries', '', 2500, '2026-10-12'),
+    ];
+    const bills = C.inferBills(hist, ['House Services', 'Groceries']);
+    eq(bills['House Services|agua'].months, 2); eq(bills['House Services|agua'].next, '2027-01-05');
+    eq(bills['House Services|luz'].next, '2026-11-14');
+    ok(!bills.Groceries, 'supermercado no es un recibo: sin fecha');
+    const budget = { cats: { 'House Services': { cents: 30000, subs: { water: 9000, electricity: 8000 } }, Groceries: { cents: 50000 } } };
+    const subBills = { agua: bills['House Services|agua'], luz: bills['House Services|luz'] };
+    const s = C.summarize([X('e3', 'House Services', 'luz', 7100, '2026-10-30')], budget, { 'House Services': { type: 'fixed', subBills }, Groceries: { type: 'fixed' } }, P9, '2026-11-09');
+    const w = s.pending.find((p) => p.sub === 'water');
+    eq(w.due, '2027-01-05'); eq(w.later, true); eq(w.months, 2); eq(w.inferred, true);
+    eq(s.pending.find((p) => p.category === 'Groceries').due, null);
+  });
+  test('Por pagar = fijos pendientes + lo que queda de las variables', () => {
+    const budget = { cats: { Rent: { cents: 90000 }, Groceries: { cents: 50000 }, 'Eating out': { cents: 12000 }, Extra: { cents: 5000 } } };
+    const meta = { Rent: { type: 'fixed' }, Groceries: { type: 'fixed' } };
+    const s = C.summarize([X('a', 'Groceries', '', 17332, '2026-11-01'), X('b', 'Eating out', '', 2000, '2026-11-02'), X('c', 'Extra', '', 7000, '2026-11-03'), { id: 'i', date: '2026-10-30', cents: 300000, treatment: 'income', category: 'Salario' }], budget, meta, P9, '2026-11-09');
+    eq(s.pendingTotal, 90000 + 32668, 'fijos: alquiler + resto de Groceries');
+    eq(s.toPayTotal, 90000 + 32668 + 10000, 'Extra pasada no resta');
+    eq(s.toPay.filter((p) => p.kind === 'variable').map((p) => p.category), ['Eating out']);
+    eq(s.margin, 300000 - 26332 - s.toPayTotal);
+    const o = C.periodOutlook(s, { cents: 350000, date: '2026-11-09' }, 350000 - 74700, 74700);
+    eq(o.toSpend, s.toPayTotal); eq(o.savings, s.margin);
+    eq(o.previous, { cents: 74700, moved: 74700, inBank: 0 }, '747 € de meses anteriores, ya en Ahorros');
+    eq(C.periodOutlook(s, { cents: 350000, date: '2026-11-09' }, 350000 - 74700, 0).previous.inBank, 74700);
+  });
+
   const passed = results.filter((r) => r.ok).length;
   if (typeof document !== 'undefined') {
     const el = document.getElementById('out');
