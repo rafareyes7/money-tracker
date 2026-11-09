@@ -620,6 +620,28 @@
 
   // ───────────────────────── Presupuesto ─────────────────────────
 
+  /** Sinónimos de recibos (inglés, castellano, catalán y comercios típicos): 'water' ↔ 'agua' ↔ 'Aigües de Barcelona'. */
+  const SUB_SYN = {
+    water: ['WATER', 'AGUA', 'AGUAS', 'AIGUA', 'AIGUES', 'AQUALIA'],
+    electricity: ['ELECTRICITY', 'ELECTRICIDAD', 'ELECTRICITAT', 'ELECTRIC', 'LUZ', 'LLUM', 'ENDESA', 'IBERDROLA', 'HOLALUZ'],
+    gas: ['GAS', 'BUTANO'],
+    internet: ['INTERNET', 'FIBRA', 'WIFI', 'ADSL'],
+    phone: ['PHONE', 'MOBILE', 'MOVIL', 'TELEFONO', 'TELEFON'],
+  };
+  /** Grupo de sinónimos de un texto (palabra completa), o '' si no hay. */
+  function synKey(text) {
+    const n = ' ' + normText(text) + ' ';
+    for (const k of Object.keys(SUB_SYN)) if (SUB_SYN[k].some((w) => n.includes(' ' + w + ' '))) return k;
+    return '';
+  }
+  /** Suma n meses a una fecha ISO, usando el día `day` (o el de la fecha) ajustado al final de mes. */
+  function addMonths(iso, n, day) {
+    let [y, m, d] = iso.split('-').map(Number); d = day || d; m += n;
+    while (m > 12) { m -= 12; y++; }
+    while (m < 1) { m += 12; y--; }
+    return toISO(y, m, Math.min(d, daysInMonth(y, m)));
+  }
+
   /**
    * Relaciona subcategorías del presupuesto con etiquetas usadas que se escriben distinto
    * (mayúsculas, acentos, o idioma: 'electricity' ↔ 'electricidad'). Devuelve { subPresupuesto: etiqueta }.
@@ -638,6 +660,7 @@
         let k = 0; while (k < nb.length && k < nt.length && nb[k] === nt[k]) k++;
         if (k >= 6 && k > bestLen) { best = t; bestLen = k; }
       });
+      if (!best) { const sk = synKey(bs); if (sk) best = tags.find((t) => !used.has(t) && !budgetSubs.includes(t) && synKey(t) === sk) || null; }
       if (best) { out[bs] = best; used.add(best); }
     });
     return out;
@@ -661,6 +684,35 @@
   }
 
   /**
+   * Recibos deducidos del historial, por categoría fija y por 'Categoría|etiqueta':
+   * { last, day, months, next }. months = cada cuántos meses se cobra (1 mensual, 2 bimensual…),
+   * next = próximo cobro esperado. Lo que se cobra más de 2 veces por periodo (ej. supermercado) no es un recibo: no tiene fecha.
+   */
+  function inferBills(entries, fixedCats) {
+    const set = new Set(fixedCats); const acc = {};
+    entries.forEach((e) => {
+      if (e.treatment !== 'expense' || !set.has(e.category)) return;
+      const d = e.bankDate || e.date; const pid = e.periodId || d.slice(0, 7);
+      [e.category, e.subcategory ? e.category + '|' + e.subcategory : null].forEach((k) => {
+        if (!k) return;
+        const a = acc[k] || (acc[k] = { dates: [], periods: new Set() });
+        a.dates.push(d); a.periods.add(pid);
+      });
+    });
+    const out = {};
+    Object.entries(acc).forEach(([k, a]) => {
+      if (a.dates.length / a.periods.size > 2) return; // gasto frecuente, no un recibo
+      const dates = [...new Set(a.dates)].sort();
+      const last = dates[dates.length - 1], day = Number(last.slice(8, 10));
+      const gaps = []; for (let i = 1; i < dates.length; i++) { const g = diffDays(dates[i - 1], dates[i]); if (g >= 20) gaps.push(g); }
+      gaps.sort((x, y) => x - y);
+      const months = gaps.length ? Math.max(1, Math.round(gaps[Math.floor((gaps.length - 1) / 2)] / 30.4)) : 1;
+      out[k] = { last, day, months, next: addMonths(last, months, day) };
+    });
+    return out;
+  }
+
+  /**
    * Resumen del periodo: ingresos, gastos, ahorro, por pagar, disponible, previsión y avisos.
    * entries: libro del periodo. budget: { cats: { Cat: { cents, subs: { tag: cents } } } }.
    * meta: { Cat: { type: 'fixed'|'variable', dueDay, savings, estimate } }.
@@ -677,7 +729,12 @@
       const c = e.category || 'Sin categoría';
       const v = e.treatment === 'refund' ? -e.cents : e.cents;
       spent[c] = (spent[c] || 0) + v;
-      const s = e.subcategory || '';
+      let s = e.subcategory || '';
+      if (!s) { // sin etiqueta: se deduce del comercio si coincide con una subcategoría del presupuesto (ej. 'Aigües' → 'water')
+        const names = Object.keys((bcats[c] && bcats[c].subs) || {});
+        const k = names.length ? synKey([e.description, e.bankDescription, e.comment].filter(Boolean).join(' ')) : '';
+        if (k) s = names.find((n) => synKey(n) === k) || '';
+      }
       subSpent[c] = subSpent[c] || {}; subSpent[c][s] = (subSpent[c][s] || 0) + v;
       (byCat[c] = byCat[c] || []).push(e);
     });
@@ -707,35 +764,51 @@
       const pct = b > 0 ? Math.round((s / b) * 100) : (s > 0 ? (closed ? 100 : 999) : 0);
       return {
         name, type: m.type === 'fixed' ? 'fixed' : 'variable', savings: !!m.savings, estimate: !!m.estimate,
-        dueDay: m.dueDay || null, subDue: m.subDue || {}, budget: b, originalBudget: original, closed, spent: s,
+        dueDay: m.dueDay || null, subDue: m.subDue || {}, bill: m.bill || null, subBills: m.subBills || {}, budget: b, originalBudget: original, closed, spent: s,
         remaining: b - s, pct, color: closed && s <= original ? 'n' : colorFor(pct), subs, entries: byCat[name] || [],
       };
     }).sort((a, b) => b.budget - a.budget || b.spent - a.spent);
 
     const fixed = cats.filter((c) => c.type === 'fixed'), variable = cats.filter((c) => c.type !== 'fixed');
     const pending = [], paid = [];
+    // Fecha esperada: día fijado a mano, o próximo cobro según el historial (con su frecuencia).
+    const fromBill = (bill) => {
+      if (!bill) return null;
+      let next = bill.next, n = 0;
+      while (next < period.start && n++ < 24) next = addMonths(next, bill.months, bill.day);
+      return { due: next, months: bill.months, later: next > period.end, inferred: true };
+    };
+    const dueOf = (bill, day) => fromBill(bill) || (day ? { due: dueDateInPeriod(period, day), months: 1, later: false, inferred: false } : null);
+    const subBillOf = (c, s) => {
+      if (c.subBills[s.name]) return c.subBills[s.name];
+      if (s.alias && c.subBills[s.alias]) return c.subBills[s.alias];
+      const k = synKey(s.name); const t = k && Object.keys(c.subBills).find((x) => synKey(x) === k);
+      return t ? c.subBills[t] : null;
+    };
+    const item = (category, sub, cents, d, estimate) => ({ category, sub, cents, due: d ? d.due : null, months: d ? d.months : null, later: !!(d && d.later), inferred: !!(d && d.inferred), estimate: !!estimate, kind: 'fixed' });
     fixed.forEach((c) => {
       if (c.budget <= 0) return;
       const tol = Math.max(100, Math.round(c.budget * 0.03));
       const catPending = c.budget - c.spent;
-      const due = c.dueDay ? dueDateInPeriod(period, c.dueDay) : null;
-      if (catPending <= tol) { paid.push(c); return; }
-      // Un recibo ya cobrado este periodo cuenta como pagado aunque fuera más barato.
-      if (c.estimate && c.spent > 0 && !c.subs.some((s) => s.budget > 0)) { paid.push(c); return; }
-      let subTotal = 0;
+      const dueInfo = dueOf(c.bill, c.dueDay);
       const hasSubBudgets = c.subs.some((s) => s.budget > 0);
+      // Con subcategorías se mira cada recibo por separado: un recibo caro (ej. agua bimensual) no da por pagados los demás.
+      if (!hasSubBudgets && catPending <= tol) { paid.push(c); return; }
+      // Un recibo ya cobrado este periodo cuenta como pagado aunque fuera más barato.
+      if (c.estimate && c.spent > 0 && !hasSubBudgets) { paid.push(c); return; }
+      let subTotal = 0;
       c.subs.forEach((s) => {
         if (s.budget <= 0 || s.spent > 0) return;
         const p = s.budget - s.spent;
         if (p > Math.max(100, Math.round(s.budget * 0.03))) {
-          const sp = Math.min(p, catPending - subTotal); if (sp <= 0) return;
-          const sd = c.subDue[s.name] ? dueDateInPeriod(period, c.subDue[s.name]) : due;
-          subTotal += sp; pending.push({ category: c.name, sub: s.name, cents: sp, due: sd, estimate: c.estimate });
+          const sp = p;
+          const sd = dueOf(subBillOf(c, s), c.subDue[s.name]) || dueInfo;
+          subTotal += sp; pending.push(item(c.name, s.name, sp, sd, c.estimate));
         }
       });
       const rest = catPending - subTotal;
       // Con subcategorías, el resto sin asignar es margen, no un pago previsto.
-      if (!hasSubBudgets && rest > tol) pending.push({ category: c.name, sub: '', cents: rest, due, estimate: c.estimate });
+      if (!hasSubBudgets && rest > tol) pending.push(item(c.name, '', rest, dueInfo, c.estimate));
       if (!pending.some((p) => p.category === c.name)) paid.push(c);
     });
     pending.sort((a, b) => (a.due || '9') < (b.due || '9') ? -1 : (a.due || '9') > (b.due || '9') ? 1 : b.cents - a.cents);
@@ -749,7 +822,12 @@
     const fixedSpent = sum(fixed, (c) => c.spent);
     const available = varBudget - varSpent;
     const perDay = daysLeft > 0 ? Math.round(Math.max(0, available) / daysLeft) : null;
-    const margin = income - spentTotal - pendingTotal - Math.max(0, available);
+    // Lo que falta pagar según el presupuesto: fijos pendientes + lo que queda de cada categoría variable.
+    const toPay = pending.slice();
+    variable.filter((c) => c.budget > 0 && c.remaining > 0).sort((a, b) => b.remaining - a.remaining)
+      .forEach((c) => toPay.push({ category: c.name, sub: '', cents: c.remaining, due: null, months: null, later: false, inferred: false, estimate: false, kind: 'variable' }));
+    const toPayTotal = sum(toPay, (p) => p.cents);
+    const margin = income - spentTotal - toPayTotal;
     // Ritmo actual por categoría: los gastos grandes y únicos (más de 50 € y 3× la mediana) cuentan una vez, no se extrapolan.
     const projectCat = (c) => {
       if (elapsed >= totalDays) return c.spent;
@@ -776,7 +854,7 @@
 
     return {
       income, spentTotal, consumption: spentTotal - savings, savings, balance: income - spentTotal,
-      budgetTotal, pending, pendingTotal, paid, available, perDay, daysLeft, elapsed, totalDays, elapsedPct,
+      budgetTotal, pending, pendingTotal, toPay, toPayTotal, paid, available, perDay, daysLeft, elapsed, totalDays, elapsedPct,
       margin, closing, cats, fixed, variable, varBudget, varSpent, fixedSpent, varProjected,
       fixedBudget: sum(fixed, (c) => c.budget), alerts: alerts.slice(0, 4),
     };
@@ -788,7 +866,7 @@
    */
   function projectBalance(s, balanceCents) {
     if (!Number.isFinite(balanceCents)) return null;
-    const restBudget = Math.max(0, s.available);
+    const restBudget = Number.isFinite(s.toPayTotal) ? s.toPayTotal - s.pendingTotal : Math.max(0, s.available);
     const restPace = Math.max(0, s.varProjected - s.varSpent);
     return {
       balance: balanceCents, pending: s.pendingTotal, restBudget, restPace,
@@ -801,8 +879,8 @@
    * Resumen directo del periodo: con el saldo del banco (si lo hay), lo gastado, lo que falta del presupuesto
    * y lo que ahorrarás. Todas las cifras salen de summarize().
    */
-  function periodOutlook(s, balance, bankNetSinceStart) {
-    const restBudget = Math.max(0, s.available);
+  function periodOutlook(s, balance, bankNetSinceStart, movedToSavings) {
+    const restBudget = Number.isFinite(s.toPayTotal) ? s.toPayTotal - s.pendingTotal : Math.max(0, s.available);
     const toSpend = s.pendingTotal + restBudget;              // lo que aún falta gastar del presupuesto
     const out = {
       income: s.income, spent: s.spentTotal, pending: s.pendingTotal, restBudget, toSpend,
@@ -817,6 +895,9 @@
       if (Number.isFinite(bankNetSinceStart)) {
         out.opening = balance.cents - bankNetSinceStart;
         out.other = out.endBalance - out.opening - out.savings; // traspasos excluidos, efectivo, reembolsos sin clasificar…
+        // Dinero de meses anteriores: aviso aparte. Lo apuntado en Ahorros este periodo ya no está en la cuenta de la nómina.
+        const moved = Math.max(0, movedToSavings || 0);
+        out.previous = { cents: out.opening, moved, inBank: Math.max(0, out.opening - moved) };
       }
     }
     return out;
@@ -987,11 +1068,11 @@
       breakdown: catsBy(s.cats, (c) => c.spent).map((b) => Object.assign(b, { sub: (b.sub ? b.sub + ' · ' : '') + (s.spentTotal ? Math.round((b.cents / s.spentTotal) * 100) + ' %' : '') })),
       top: exp(allEntries), note: 'Gastos menos reembolsos. No incluye lo excluido ni los ingresos.' };
     if (key === 'pending') return {
-      title: 'Por pagar', lines: s.pending.map((p) => L(p.category + (p.sub ? ' › ' + p.sub : '') + (p.due ? ' (~' + formatDateShort(p.due) + ')' : ''), p.cents, '+')),
-      result: { label: 'Por pagar', cents: s.pendingTotal }, breakdown: [],
-      note: 'Categorías fijas cuyo presupuesto aún no se ha cobrado (presupuesto − pagado). Si algo no se pagará, ciérralo.' };
+      title: 'Por pagar', lines: (s.toPay || s.pending).map((p) => L(p.category + (p.sub ? ' › ' + p.sub : '') + (p.due ? ' (~' + formatDateShort(p.due) + ')' : p.kind === 'variable' ? ' (resto)' : ''), p.cents, '+')),
+      result: { label: 'Por pagar', cents: Number.isFinite(s.toPayTotal) ? s.toPayTotal : s.pendingTotal }, breakdown: [],
+      note: 'Lo que falta según tu presupuesto: recibos fijos aún no cobrados y lo que queda de cada categoría variable. La fecha sale del último cobro y de cada cuánto se cobra. Si algo no se pagará, ciérralo.' };
     if (key === 'margin') return {
-      title: 'Ahorro previsto', lines: [L('Ingresos', s.income), L('Gastado', s.spentTotal, '−'), L('Por pagar', s.pendingTotal, '−'), L('Te quedan (si lo gastas)', Math.max(0, s.available), '−')],
+      title: 'Ahorro previsto', lines: [L('Ingresos', s.income), L('Gastado', s.spentTotal, '−'), L('Por pagar (según presupuesto)', Number.isFinite(s.toPayTotal) ? s.toPayTotal : s.pendingTotal + Math.max(0, s.available), '−')],
       result: { label: s.margin >= 0 ? 'Ahorro previsto' : 'Déficit previsto', cents: s.margin }, breakdown: [], note: 'Lo que sobraría si gastas justo tu presupuesto.' };
     if (key === 'balance') return {
       title: 'Saldo de hoy', lines: [L('Ingresos', s.income), L('Gastado', s.spentTotal, '−')], result: { label: 'Saldo hoy', cents: s.balance }, breakdown: [], note: 'Del periodo, no de tu cuenta del banco.' };
@@ -1001,7 +1082,7 @@
       result: { label: 'Previsión al cierre', cents: s.closing }, breakdown: [], note: 'Si sigues gastando en variables al mismo ritmo que hasta hoy.' };
     if (key === 'endBalance' && extra.balance) {
       const p = projectBalance(s, extra.balance.cents);
-      return { title: 'Al final del periodo', lines: [L('Saldo del banco (' + formatDate(extra.balance.date) + ')', p.balance), L('Por pagar', p.pending, '−'), L('Resto del día a día (presupuesto)', p.restBudget, '−')],
+      return { title: 'Al final del periodo', lines: [L('Saldo del banco (' + formatDate(extra.balance.date) + ')', p.balance), L('Por pagar (fijos)', p.pending, '−'), L('Por pagar (resto de variables)', p.restBudget, '−')],
         result: { label: 'Si cumples el presupuesto', cents: p.ifBudget }, breakdown: [{ label: 'Al ritmo actual', cents: p.atPace, sub: 'resta ' + formatMoney(p.restPace) + ' en vez de ' + formatMoney(p.restBudget) }],
         note: 'Supone que no entran más ingresos en este periodo.' };
     }
@@ -1074,7 +1155,7 @@
     matchMovements, pairKey, matchId,
     DEFAULT_RULES, suggestForBank, learnRule,
     buildLedger, isPending,
-    colorFor, matchSubNames, inferDueDays, summarize, projectBalance, periodOutlook, buildHistory, householdSummary, savingsSummary, explainEntry, explainFigure,
+    colorFor, synKey, addMonths, matchSubNames, inferDueDays, inferBills, summarize, projectBalance, periodOutlook, buildHistory, householdSummary, savingsSummary, explainEntry, explainFigure,
     TOSHL_HEADER, toToshlCSV, toLedgerJSON, fromV2Profiles,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;

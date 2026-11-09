@@ -82,6 +82,8 @@ No se guarda número de cuenta ni titular: las filas anteriores a la cabecera de
 
 **v1.8 · Resumen claro y previsión más realista:** tarjeta "🧭 Tu periodo, claro" en Inicio: saldo del banco − falta por pagar − te queda por gastar = con cuánto acabas, y "este periodo ahorrarás" = ingresos − gasto total previsto. La previsión "al ritmo actual" ya no multiplica gastos grandes y únicos (más de 50 € y más de 3× la mediana de su categoría): cuentan una sola vez.
 
+**v1.9 · Por pagar según presupuesto:** "Por pagar" muestra todo lo que falta según el presupuesto: recibos fijos aún no cobrados y lo que queda de cada categoría variable. Desaparece "Te quedan para el día a día". Cada recibo muestra la fecha esperada según cobros anteriores (último cobro + frecuencia: mensual, bimensual…); lo que se cobra más de 2 veces por periodo (supermercado) no tiene fecha. Las subcategorías se reconocen aunque la etiqueta esté en otro idioma o falte (water ↔ agua ↔ Aigües). Un recibo caro no reduce lo pendiente de otro. Groceries pasa a fijo. "Tu periodo, claro" = ingresos − gastado − falta por pagar = te sobrará este periodo; el dinero de meses anteriores sale como aviso aparte (y si lo apuntaste en Ahorros, indica que ya no está en la cuenta).
+
 ## 6. Riesgos y cómo están resueltos
 
 | Riesgo | Solución |

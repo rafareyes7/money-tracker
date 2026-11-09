@@ -22,7 +22,7 @@
   const capital = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
   const DEFAULT_CATS = {
-    'Groceries': { icon: '🛒', type: 'variable' },
+    'Groceries': { icon: '🛒', type: 'fixed' },
     'Eating out': { icon: '🍽️', type: 'variable' },
     'Extra': { icon: '🎯', type: 'variable' },
     'HouseHold': { icon: '🧹', type: 'variable' },
@@ -97,14 +97,18 @@
   function metaForSummary() {
     const fixed = Object.keys(S.categories).filter((c) => S.categories[c].type === 'fixed');
     const inferred = C.inferDueDays(L.all, fixed);
+    const bills = C.inferBills(L.all, fixed);
     const meta = {};
     const anyBudget = budgetInfo().budget || { cats: {} };
     Object.entries(S.categories).forEach(([c, m]) => {
       const hasSubs = Object.keys(((anyBudget.cats || {})[c] || {}).subs || {}).length > 0;
       const subDue = {};
       Object.keys(inferred).forEach((k) => { if (k.startsWith(c + '|')) subDue[k.slice(c.length + 1)] = inferred[k]; });
+      const subBills = {};
+      Object.keys(bills).forEach((k) => { if (k.startsWith(c + '|')) subBills[k.slice(c.length + 1)] = bills[k]; });
       const inf = hasSubs ? null : inferred[c];
-      meta[c] = Object.assign({}, m, { dueDay: m.dueDay || inf || null, dueInferred: !m.dueDay && !!inf, subDue });
+      const bill = m.dueDay || hasSubs ? null : bills[c] || null;
+      meta[c] = Object.assign({}, m, { dueDay: m.dueDay || (bill ? bill.day : null) || null, dueInferred: !m.dueDay && !!(bill || inf), subDue, bill, subBills: m.dueDay ? {} : subBills });
     });
     return meta;
   }
@@ -148,6 +152,12 @@
       S.settings.migratedVariables141 = true;
       await Promise.all([DB.setKV('settings', S.settings), DB.setKV('categories', S.categories)]);
       if (changed.length) setTimeout(() => toast(changed.join(', ') + ' ahora son Variable'), 800);
+    }
+    // v1.9: Groceries pasa a fijo (lo que falta de su presupuesto se ve en "Por pagar").
+    if (!S.settings.migratedGroceriesFixed19) {
+      if (S.categories.Groceries && S.categories.Groceries.type !== 'fixed') S.categories.Groceries.type = 'fixed';
+      S.settings.migratedGroceriesFixed19 = true;
+      await Promise.all([DB.setKV('settings', S.settings), DB.setKV('categories', S.categories)]);
     }
   }
   function markChanged() { S.settings.dataChangedAt = Date.now(); }
@@ -266,29 +276,34 @@
       return h + balanceCard(s, p) + alertsCard(s);
     }
     if (today() >= p.start && today() <= p.end) h += outlookCard(s, pend);
-    const avail = s.available;
-    const base = Math.max(1, s.spentTotal + s.pendingTotal + Math.max(0, avail) + Math.max(0, s.margin));
+    const toPay = s.toPayTotal;
+    const base = Math.max(1, s.spentTotal + toPay + Math.max(0, s.margin));
     const w = (v) => (Math.max(0, v) / base * 100).toFixed(2) + '%';
-    h += '<div class="hero"><div class="lbl">' + (avail >= 0 ? 'Te quedan para el día a día' : 'Te has pasado en el día a día') + ' ' + infoBtn('available') + '</div>' +
-      '<div class="big' + (avail < 0 ? ' neg' : '') + '">' + money(avail) + '</div>' +
-      '<div class="perday">' + (s.daysLeft > 0 ? s.daysLeft + ' día' + (s.daysLeft > 1 ? 's' : '') + ' · <b>≈ ' + money(s.perDay) + ' / día</b> ' + infoBtn('perDay') : (p.end < today() ? 'Periodo cerrado' : 'El periodo aún no ha empezado')) + '</div>' +
-      '<div class="bar-stack" aria-hidden="true"><i style="width:' + w(s.spentTotal) + ';background:var(--seg-spent)"></i><i style="width:' + w(s.pendingTotal) + ';background:var(--seg-due)"></i><i style="width:' + w(avail) + ';background:var(--seg-free)"></i><i style="width:' + w(s.margin) + ';background:var(--seg-save)"></i></div>' +
-      '<div class="legend"><span style="--c:var(--seg-spent)"><em>Gastado ' + infoBtn('spent') + '</em><b>' + money(s.spentTotal) + '</b></span><span style="--c:var(--seg-due)"><em>Por pagar ' + infoBtn('pending') + '</em><b>' + money(s.pendingTotal) + '</b></span>' +
-      '<span style="--c:var(--seg-free)"><em>Disponible</em><b>' + money(Math.max(0, avail)) + '</b></span><span style="--c:var(--seg-save)"><em>' + (s.margin >= 0 ? 'Ahorro' : 'Déficit') + ' ' + infoBtn('margin') + '</em><b>' + money(s.margin) + '</b></span></div>' + closedVarLine(s) +
+    h += '<div class="hero"><div class="lbl">Falta por pagar ' + infoBtn('pending') + '</div>' +
+      '<div class="big">' + money(toPay) + '</div>' +
+      '<div class="perday">' + (s.daysLeft > 0 ? 'según tu presupuesto · quedan ' + s.daysLeft + ' día' + (s.daysLeft > 1 ? 's' : '') + ' del periodo' : (p.end < today() ? 'Periodo cerrado' : 'El periodo aún no ha empezado')) + '</div>' +
+      '<div class="bar-stack" aria-hidden="true"><i style="width:' + w(s.spentTotal) + ';background:var(--seg-spent)"></i><i style="width:' + w(toPay) + ';background:var(--seg-due)"></i><i style="width:' + w(s.margin) + ';background:var(--seg-save)"></i></div>' +
+      '<div class="legend"><span style="--c:var(--seg-spent)"><em>Gastado ' + infoBtn('spent') + '</em><b>' + money(s.spentTotal) + '</b></span><span style="--c:var(--seg-due)"><em>Por pagar ' + infoBtn('pending') + '</em><b>' + money(toPay) + '</b></span>' +
+      '<span style="--c:var(--seg-save)"><em>' + (s.margin >= 0 ? 'Te sobra' : 'Déficit') + ' ' + infoBtn('margin') + '</em><b>' + money(s.margin) + '</b></span></div>' + closedVarLine(s) +
       '<div class="sub" style="margin-top:8px">' + (s.income ? 'Sobre ingresos de ' + money(s.income) : 'Aún no hay ingresos en este periodo') + (info.from ? ' · presupuesto de ' + esc(C.periodLabel(period(info.from))) : '') + '</div></div>';
     h += '<div class="tiles"><div class="tile"><small>Saldo hoy ' + infoBtn('balance') + '</small><b>' + money(s.balance, { sign: true }) + '</b><span class="s">ingresos − gastado</span></div>' +
       '<div class="tile"><small>Previsión al cierre ' + infoBtn('closing') + '</small><b style="color:var(' + (s.closing >= 0 ? '--ok' : '--bad') + ')">' + money(s.closing, { sign: true }) + '</b><span class="s">al ritmo actual</span></div></div>';
     const tNow = today();
     h += (tNow >= p.start && tNow <= p.end) ? '' : balanceCard(s, p);
-    h += '<div class="card"><div class="row-between"><h3>⏳ Por pagar ' + infoBtn('pending') + '</h3><span class="amt">' + money(s.pendingTotal) + '</span></div><div style="margin-top:6px">';
-    if (!s.pending.length) h += '<p class="sub" style="padding:8px 0">Nada pendiente de los gastos fijos. 🎉</p>';
-    const meta = metaForSummary();
-    s.pending.forEach((it) => {
+    h += '<div class="card"><div class="row-between"><h3>⏳ Por pagar ' + infoBtn('pending') + '</h3><span class="amt">' + money(s.toPayTotal) + '</span></div><div style="margin-top:6px">';
+    if (!s.toPay.length) h += '<p class="sub" style="padding:8px 0">Nada pendiente según tu presupuesto. 🎉</p>';
+    s.toPay.forEach((it) => {
       const est = it.estimate ? '~' : '';
-      const dueTxt = it.due ? (it.due === today() ? 'Hoy' : it.due === C.addDays(today(), 1) ? 'Mañana' : it.due < today() ? 'Pendiente desde el día ' + Number(it.due.slice(8)) : 'Habitual día ' + Number(it.due.slice(8))) : 'Sin día de pago';
-      const inf = meta[it.category] && meta[it.category].dueInferred ? ' · deducido' : '';
+      const freq = it.months === 2 ? ' · bimensual' : it.months > 2 ? ' · cada ' + it.months + ' meses' : '';
+      const dueTxt = it.kind === 'variable' ? 'Lo que queda del presupuesto'
+        : !it.due ? 'Según presupuesto · sin fecha de cobro'
+        : it.later ? 'Esperado ~' + C.formatDateShort(it.due) + ' (próximo periodo)'
+        : it.due === today() ? 'Hoy' : it.due === C.addDays(today(), 1) ? 'Mañana'
+        : it.due < today() ? 'Esperado el ' + C.formatDateShort(it.due) + ', aún sin cobrar' : 'Esperado ~' + C.formatDateShort(it.due);
+      const inf = it.due && it.inferred ? ' · según cobros anteriores' : '';
+      const btn = it.kind === 'variable' ? 'Cerrar este periodo' : 'No se pagará este periodo';
       h += '<div class="due"><div class="d">' + (it.due ? C.dowName(it.due) + '<b>' + Number(it.due.slice(8)) + '</b>' : '—') + '</div><div class="n">' + catIcon(it.category) + ' ' + esc(it.category) + (it.sub ? ' › ' + esc(it.sub) : '') +
-        '<div class="sub">' + dueTxt + inf + (it.estimate ? ' · estimado' : '') + '</div><button class="mini" data-a="close-item" data-v="' + esc(it.sub ? it.category + '|' + it.sub : it.category) + '">No se pagará este periodo</button></div><span class="amt">' + est + money(it.cents) + '</span></div>';
+        '<div class="sub">' + dueTxt + freq + inf + (it.estimate ? ' · estimado' : '') + '</div><button class="mini" data-a="close-item" data-v="' + esc(it.sub ? it.category + '|' + it.sub : it.category) + '">' + btn + '</button></div><span class="amt">' + est + money(it.cents) + '</span></div>';
     });
     h += '</div>';
     h += closedFixedLines(s);
@@ -309,7 +324,7 @@
     return '<button class="card" style="width:100%;text-align:left;display:block" data-a="balance-sheet"><div class="row-between"><h3>💶 Al final del periodo ' + infoBtn('endBalance') + '</h3><span class="chev">›</span></div>' +
       '<div class="row-between" style="margin-top:8px;align-items:baseline"><span class="sub">Si cumples el presupuesto</span><b class="amt" style="font-size:22px;color:var(' + (pr.ifBudget >= 0 ? '--ok' : '--bad') + ')">' + money(pr.ifBudget) + '</b></div>' +
       '<div class="row-between" style="margin-top:4px"><span class="sub">Al ritmo actual</span><b class="amt">' + money(pr.atPace) + '</b></div>' +
-      '<div class="sub" style="margin-top:8px">Saldo ' + money(b.cents) + ' (' + origin + ') − por pagar ' + money(pr.pending) + ' − resto del día a día ' + money(pr.restBudget) + '</div>' +
+      '<div class="sub" style="margin-top:8px">Saldo ' + money(b.cents) + ' (' + origin + ') − por pagar ' + money(pr.pending + pr.restBudget) + ' (según presupuesto)</div>' +
       (stale ? '<div class="sub" style="color:var(--warn);margin-top:4px">El saldo es de antes de este periodo. Actualízalo.</div>' : '') + '</button>';
   }
   function openBalanceSheet() {
@@ -497,31 +512,24 @@
       bankNet = 0;
       Object.values(S.movements).forEach((m) => { if (m.source === 'bank') { if (m.date >= p.start && m.date <= b.date) bankNet += m.cents; if (m.date > lastBank) lastBank = m.date; } });
     }
-    const o = C.periodOutlook(s, b, bankNet);
+    // Lo apuntado en Ahorros desde el inicio del periodo ya salió de la cuenta de la nómina.
+    const moved = (S.savings.entries || []).filter((x) => x.type === 'deposit' && x.date >= p.start && x.date <= today()).reduce((a, x) => a + Math.abs(x.cents || 0), 0);
+    const o = C.periodOutlook(s, b, bankNet, moved);
     const row = (sign, label, cents, sub, strong) => '<div class="ol-row' + (strong ? ' strong' : '') + '"><span class="op">' + sign + '</span><span class="lb">' + label + (sub ? '<small>' + sub + '</small>' : '') + '</span><b class="amt">' + money(cents) + '</b></div>';
     let h = '<div class="card outlook"><h3>🧭 Tu periodo, claro</h3>';
-    if (o.balance) {
-      const lastMov = entries().reduce((m, e) => ((e.bankDate || e.date) > m ? (e.bankDate || e.date) : m), '');
-      h += row('', 'Tienes en el banco', o.balance.cents, 'dato del ' + C.formatDateShort(o.balance.date) + ' · ya descuenta lo que has gastado') +
-        row('−', 'Falta por pagar (fijos)', o.pending, '') +
-        row('−', 'Te queda por gastar (día a día)', o.restBudget, '') +
-        row('=', 'Te quedará en el banco', o.endBalance, 'al final del periodo, si cumples el presupuesto', true);
-      if (Number.isFinite(o.opening)) {
-        h += '<div class="ol-split"><div class="sub" style="font-weight:600;margin-bottom:2px">¿De dónde salen esos ' + money(o.endBalance) + '?</div>' +
-          row('', 'Ya tenías al empezar el periodo', o.opening, 'el ' + C.formatDateShort(p.start) + ': dinero de meses anteriores') +
-          row('+', 'Ahorras este periodo', o.savings, 'ingresos − gasto total previsto') +
-          (o.other ? row(o.other >= 0 ? '+' : '−', 'Otros movimientos del banco', Math.abs(o.other), 'traspasos excluidos, Bizum sin clasificar, efectivo de Toshl…') : '') + '</div>';
-        if (b.source === 'manual' && lastBank && lastBank < b.date) h += '<p class="sub" style="color:var(--warn)">Aproximado: escribiste el saldo a mano el ' + C.formatDateShort(b.date) + ' y el último movimiento importado del banco es del ' + C.formatDateShort(lastBank) + '.</p>';
-      }
-      if (lastMov && o.balance.date < lastMov) h += '<p class="sub" style="color:var(--warn)">El saldo es del ' + C.formatDateShort(o.balance.date) + ' y hay movimientos posteriores: actualízalo importando el banco o en Ajustes.</p>';
-    } else {
-      h += row('', 'Ingresos del periodo', o.income, '') + row('−', 'Ya gastado', o.spent, '') + row('−', 'Falta por pagar (fijos)', o.pending, '') + row('−', 'Te queda por gastar (día a día)', o.restBudget, '');
+    h += row('', 'Ingresos del periodo', o.income, '') +
+      row('−', 'Ya gastado', o.spent, '') +
+      row('−', 'Falta por pagar', o.toSpend, 'según tu presupuesto') +
+      row('=', 'Te sobrará este periodo', o.savings, 'lo que puedes pasar a ahorro', true);
+    if (o.previous && o.previous.cents > 0) {
+      const pv = o.previous;
+      h += '<div class="ol-split"><p class="sub">💰 <b>Aviso: dinero de meses anteriores ' + money(pv.cents) + '</b> (en tu cuenta el ' + C.formatDateShort(p.start) + '). No se suma a lo que te sobrará.</p>' +
+        (pv.moved ? '<p class="sub">' + (pv.inBank ? 'Apuntado en Ahorros este periodo: ' + money(pv.moved) + '. Aún en tu cuenta: ' + money(pv.inBank) + '.' : '✓ Ya está en Ahorros (' + money(pv.moved) + ' apuntado este periodo): no está en tu cuenta de la nómina.') + '</p>'
+          : '<p class="sub">Si ya lo pasaste a tu cuenta de ahorro, apúntalo en Ahorros y este aviso lo tendrá en cuenta.</p>') + '</div>';
+      if (b.source === 'manual' && lastBank && lastBank < b.date) h += '<p class="sub" style="color:var(--warn)">Aproximado: escribiste el saldo a mano el ' + C.formatDateShort(b.date) + ' y el último movimiento importado del banco es del ' + C.formatDateShort(lastBank) + '.</p>';
     }
-    h += '<div class="ol-save"><span>Este periodo ahorrarás</span><b style="color:var(' + (o.savings >= 0 ? '--ok' : '--bad') + ')">' + money(o.savings) + '</b></div>' +
-      '<p class="sub" style="margin-top:6px">Ingresos ' + money(o.income) + ' − gasto total previsto ' + money(o.expectedTotal) + ' (ya gastado ' + money(o.spent) + ' + lo que falta ' + money(o.toSpend) + ').</p>';
-    if (o.overBudget) h += '<p class="sub" style="color:var(--bad)">Te has pasado ' + money(o.overBudget) + ' en el día a día: ya está incluido en lo gastado.</p>';
     if (pend) h += '<p class="sub" style="color:var(--warn)">⚠️ ' + pend + ' movimiento' + (pend > 1 ? 's' : '') + ' sin revisar: estas cifras pueden cambiar.</p>';
-    if (!o.balance) h += '<button class="mini" data-a="balance-sheet">💶 Añade tu saldo del banco para ver con cuánto acabarás</button>';
+    if (!o.balance) h += '<button class="mini" data-a="balance-sheet">💶 Añade tu saldo del banco para ver el dinero de meses anteriores</button>';
     return h + '</div>';
   }
   function closedFixedLines(s) {
