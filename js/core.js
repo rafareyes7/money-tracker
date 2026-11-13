@@ -538,17 +538,43 @@
   }
 
   /** Crea o actualiza una regla aprendida (no pisa reglas manuales). Devuelve la nueva lista. */
-  function learnRule(rules, desc, category, subcategory, treatment, manual) {
+  /** user = la regla sale de una corrección tuya (gana a lo aprendido solo y se aplica también a lo conciliado). */
+  function learnRule(rules, desc, category, subcategory, treatment, manual, user) {
     const key = merchantKey(desc);
     if (!key || key.length < 3) return rules;
     const list = (rules || []).slice();
     const i = list.findIndex((r) => normText(r.pattern) === key);
-    const rule = { id: (i >= 0 && list[i].id) || 'r_' + hashId(key), pattern: key, category: category || '', subcategory: subcategory || '', treatment: treatment || 'expense', manual: !!manual, learned: !manual };
+    const rule = { id: (i >= 0 && list[i].id) || 'r_' + hashId(key), pattern: key, category: category || '', subcategory: subcategory || '', treatment: treatment || 'expense', manual: !!manual, learned: !manual, user: !!user };
     if (i >= 0) {
       if (list[i].manual && !manual) return rules;
+      if (list[i].user && !user && !manual) return rules;
       list[i] = Object.assign({}, list[i], rule);
     } else list.push(rule);
     return list;
+  }
+
+  // ───────────────────────── Recibos: etiqueta correcta según el banco ─────────────────────────
+
+  const BILL_TAG_DEFAULT = { water: 'agua', electricity: 'electricidad', gas: 'gas', internet: 'internet', phone: 'telefono' };
+  /**
+   * Corrige la etiqueta (subcategoría) de un apunte de Toshl emparejado con un recibo del banco cuando no encaja:
+   * ej. Toshl 'electricidad' ↔ banco 'Recibo TELEFONICA · Teléfono, TV e internet' → 'internet'.
+   * Prioridad: tu regla para ese comercio (misma categoría) → lo que indica el banco (sinónimos) → nada.
+   * tags: etiquetas que usas en Toshl para esa categoría (para usar tu mismo nombre). Devuelve { to, from, why } o null.
+   */
+  function fixBillTag(bankMovs, category, toshlTag, rules, tags) {
+    if (!bankMovs || !bankMovs.length || !category) return null;
+    const desc = bankMovs[0].description || '';
+    const userRule = (rules || []).filter((r) => (r.user || r.manual) && r.category === category && r.subcategory && ruleMatches(r.pattern, desc))
+      .sort((a, b) => normText(b.pattern).length - normText(a.pattern).length)[0];
+    if (userRule) return userRule.subcategory !== (toshlTag || '') ? { to: userRule.subcategory, from: toshlTag || '', why: 'regla', pattern: userRule.pattern } : null;
+    const bankKey = synKey(bankMovs.map((b) => [b.description, b.bankSubcategory].filter(Boolean).join(' ')).join(' '));
+    if (!bankKey) return null;
+    const tagKey = toshlTag ? synKey(toshlTag) : '';
+    if (tagKey === bankKey) return null;
+    if (toshlTag && !tagKey) return null; // etiqueta tuya que no es de recibos (ej. 'casa'): no se toca
+    const own = (tags || []).find((t) => synKey(t) === bankKey);
+    return { to: own || BILL_TAG_DEFAULT[bankKey], from: toshlTag || '', why: 'banco', bankKey };
   }
 
   // ───────────────────────── Libro conciliado ─────────────────────────
@@ -562,6 +588,8 @@
     const mv = state.movements || {}, matches = state.matches || {}, dec = state.decisions || {};
     const known = state.knownCats || null;
     const used = new Set(); const out = [];
+    const tagsByCat = {};
+    Object.values(mv).forEach((x) => { if (x.source === 'toshl' && x.subcategory) (tagsByCat[x.category] = tagsByCat[x.category] || new Set()).add(x.subcategory); });
     Object.values(matches).forEach((m) => {
       const ts = m.toshlIds.map((id) => mv[id]).filter(Boolean);
       const bs = m.bankIds.map((id) => mv[id]).filter(Boolean);
@@ -574,10 +602,11 @@
       ts.forEach((t, i) => {
         const id = ts.length === 1 ? 'm:' + m.id : 'm:' + m.id + ':' + i;
         const signed = ts.length === 1 ? bankSum : t.cents;
+        const tagFix = signed < 0 ? fixBillTag(bs, t.category, t.subcategory, state.rules, [...(tagsByCat[t.category] || [])]) : null;
         out.push({
           id, matchId: m.id, date: t.date, bankDate: bs[0].date, cents: Math.abs(signed), sign: Math.sign(signed),
           treatment: signed > 0 ? 'income' : 'expense',
-          category: t.category, subcategory: t.subcategory || '',
+          category: t.category, subcategory: tagFix ? tagFix.to : (t.subcategory || ''), tagFix,
           description: t.description || bs[0].description, bankDescription: bankDesc, comment: bankComment,
           toshlCents: ts.reduce((s, x) => s + x.cents, 0), bankCents: bankSum,
           status, resolved: status === 'matched', reason: m.reason || '', account: t.account || '',
@@ -972,13 +1001,14 @@
    * Disponible = aportado − retirado − prestado pendiente. Total = aportado − retirado (lo que tendrías si te devuelven todo).
    */
   function savingsSummary(entries) {
-    let deposits = 0, withdrawals = 0, lent = 0, repaid = 0;
+    let deposits = 0, withdrawals = 0, lent = 0, repaid = 0, adjust = 0;
     const bySource = {}, byAccount = {};
     const byId = {}; (entries || []).forEach((e) => { byId[e.id] = e; });
     const acc = (e) => (e.account || (e.from && byId[e.from] && byId[e.from].account) || 'Sin cuenta');
     (entries || []).forEach((e) => {
       const c = Math.abs(e.cents || 0);
       const a = byAccount[acc(e)] || (byAccount[acc(e)] = { name: acc(e), total: 0, lent: 0, available: 0 });
+      if (e.type === 'adjust') { a.total += e.cents || 0; adjust += e.cents || 0; return; } // ajuste al saldo real (con signo)
       if (e.type === 'deposit') a.total += c;
       else if (e.type === 'withdrawal') a.total -= c;
       else if (e.type === 'loan' && !e.repaidAt) a.lent += c;
@@ -992,7 +1022,8 @@
     const pendingLoans = (entries || []).filter((e) => e.type === 'loan' && !e.repaidAt).sort((a, b) => (a.date < b.date ? -1 : 1));
     const accounts = Object.values(byAccount).map((a) => Object.assign(a, { available: a.total - a.lent }))
       .filter((a) => a.total || a.lent).sort((x, y) => y.available - x.available);
-    return { deposits, withdrawals, lent, repaid, total: deposits - withdrawals, available: deposits - withdrawals - lent, pendingLoans, bySource, accounts };
+    const total = deposits - withdrawals + adjust;
+    return { deposits, withdrawals, adjust, lent, repaid, total, available: total - lent, pendingLoans, bySource, accounts };
   }
 
   // ───────────────────────── Explicaciones (sin IA) ─────────────────────────
@@ -1032,7 +1063,9 @@
     else if (e.status === 'bank_only' && e.suggestion) {
       const sg = e.suggestion;
       cls = 'Sugerencia (aún sin confirmar) según ' + (SRC_TXT[sg.source] || 'la app') + (sg.pattern ? ' “' + sg.pattern + '”' : '') + '.';
-    } else cls = 'Categoría tomada de Toshl: ' + (e.category || '—') + (e.subcategory ? ' › ' + e.subcategory : '') + '.';
+    } else if (e.tagFix) cls = 'Categoría de Toshl: ' + e.category + '. Etiqueta corregida: en Toshl ponía “' + (e.tagFix.from || 'sin etiqueta') + '”, pero ' +
+      (e.tagFix.why === 'regla' ? 'tienes una regla para “' + e.tagFix.pattern + '”' : 'el banco indica que es ' + e.tagFix.to) + ' → “' + e.tagFix.to + '”.';
+    else cls = 'Categoría tomada de Toshl: ' + (e.category || '—') + (e.subcategory ? ' › ' + e.subcategory : '') + '.';
     steps.push({ icon: '🏷️', title: 'Clasificación', lines: [cls] });
     const type = ctx.catType ? ctx.catType(e.category) : '';
     const eff = {
@@ -1151,7 +1184,7 @@
     DEFAULT_PERIOD_CFG, naturalPeriodStart, getPeriod, periodIdForDate, shiftPeriodId, detectPeriodId, periodLabel, dueDateInPeriod,
     normText, tokens, similarity, merchantKey, ruleMatches,
     parseCSV, csvField, hashId, assignIds,
-    parseBankRows, parseBankText, parseToshl, bizumMessage,
+    parseBankRows, parseBankText, parseToshl, bizumMessage, fixBillTag, synKey,
     matchMovements, pairKey, matchId,
     DEFAULT_RULES, suggestForBank, learnRule,
     buildLedger, isPending,

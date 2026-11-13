@@ -84,6 +84,8 @@ No se guarda número de cuenta ni titular: las filas anteriores a la cabecera de
 
 **v1.9 · Por pagar según presupuesto:** "Por pagar" muestra todo lo que falta según el presupuesto: recibos fijos aún no cobrados y lo que queda de cada categoría variable. Desaparece "Te quedan para el día a día". Cada recibo muestra la fecha esperada según cobros anteriores (último cobro + frecuencia: mensual, bimensual…); lo que se cobra más de 2 veces por periodo (supermercado) no tiene fecha. Las subcategorías se reconocen aunque la etiqueta esté en otro idioma o falte (water ↔ agua ↔ Aigües). Un recibo caro no reduce lo pendiente de otro. Groceries pasa a fijo. "Tu periodo, claro" = ingresos − gastado − falta por pagar = te sobrará este periodo; el dinero de meses anteriores sale como aviso aparte (y si lo apuntaste en Ahorros, indica que ya no está en la cuenta).
 
+**v1.10 · Recibos bien etiquetados y saldo real en Ahorros:** si un apunte de Toshl emparejado con un recibo del banco tiene una etiqueta que no encaja (ej. Toshl “electricidad” ↔ banco “Recibo TELEFONICA · Teléfono, TV e internet”), la app usa la del banco (“internet”, con tu mismo nombre de etiqueta) y lo marca con 🔁. Si corriges una etiqueta a mano con “Recordar”, se guarda como regla tuya y gana siempre; lo aprendido solo no la pisa. En Ahorros, cada cuenta tiene “⚖️ Actualizar saldo real”: escribes el saldo que ves y se apunta la diferencia como “Ajuste de saldo”.
+
 ## 6. Riesgos y cómo están resueltos
 
 | Riesgo | Solución |

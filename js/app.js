@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   const C = window.Core, DB = window.DB;
-  const APP_VERSION = '1.8.1';
+  const APP_VERSION = '1.10.0';
 
   // ───────────────────────── Utilidades ─────────────────────────
   const $ = (s, el) => (el || document).querySelector(s);
@@ -335,7 +335,7 @@
     '<button class="btn" data-a="balance-save">Guardar</button>');
   }
   // ───────────────────────── Ahorros ─────────────────────────
-  const SAV_LABEL = { deposit: 'Aportación', loan: 'Préstamo', withdrawal: 'Retirada' };
+  const SAV_LABEL = { deposit: 'Aportación', loan: 'Préstamo', withdrawal: 'Retirada', adjust: 'Ajuste de saldo' };
   // ── PIN de Ahorros: nunca está en el código. Se crea en el dispositivo y se guarda como hash PBKDF2 con sal aleatoria.
   const PIN_ITER = 150000;
   const b64 = (u8) => btoa(String.fromCharCode(...u8));
@@ -381,7 +381,8 @@
       h += '<div class="card"><div class="row-between"><h3>🏦 Dónde están</h3><button class="btn plain sm" data-a="sav-lock">🔒 Bloquear</button></div><div style="margin-top:6px">' + sv.accounts.map((a) =>
         '<div style="padding:8px 0;border-top:1px solid var(--line)"><div class="row-between"><b>' + esc(a.name) + '</b><span class="amt">' + money(a.available) + '</span></div>' +
         '<div class="bar-stack" style="margin:6px 0 2px;height:8px"><i style="width:' + (Math.max(0, a.available) / max * 100).toFixed(1) + '%;background:var(--seg-save)"></i><i style="width:' + (a.lent / max * 100).toFixed(1) + '%;background:var(--seg-due)"></i></div>' +
-        (a.lent ? '<div class="sub">prestado ' + money(a.lent) + ' · total ' + money(a.total) + '</div>' : '') + '</div>').join('') + '</div></div>';
+        (a.lent ? '<div class="sub">prestado ' + money(a.lent) + ' · total ' + money(a.total) + '</div>' : '') +
+        '<button class="mini" data-a="sav-adjust" data-v="' + esc(a.name) + '">⚖️ Actualizar saldo real</button></div>').join('') + '</div></div>';
     }
     h += '<div class="btn-row" style="margin:0 0 12px"><button class="btn sm" data-a="sav-new" data-v="deposit">+ Añadir</button><button class="btn ghost sm" data-a="sav-new" data-v="loan">↗ Préstamo</button><button class="btn plain sm" data-a="sav-new" data-v="withdrawal">− Retirar</button></div>';
     if (sv.pendingLoans.length) {
@@ -390,15 +391,15 @@
     }
     h += '<div class="sec-h"><b>Movimientos</b><span>' + E.length + '</span></div><div class="list">';
     E.slice().sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : (a.createdAt || 0) < (b.createdAt || 0) ? 1 : -1)).forEach((e) => {
-      const sign = e.type === 'deposit' ? '+' : '−';
-      const col = e.type === 'deposit' ? 'var(--ok)' : e.type === 'loan' && e.repaidAt ? 'var(--muted)' : 'var(--text)';
+      const sign = e.type === 'deposit' || (e.type === 'adjust' && e.cents > 0) ? '+' : '−';
+      const col = sign === '+' ? 'var(--ok)' : e.type === 'loan' && e.repaidAt ? 'var(--muted)' : 'var(--text)';
       const src = e.from && S.savings.entries.find((x) => x.id === e.from);
       const state = e.type === 'loan' ? (e.repaidAt ? '<span class="pill ok">✓ devuelto ' + C.formatDateShort(e.repaidAt) + '</span>' : '<span class="pill warn">pendiente</span>') : '';
-      h += '<button class="tx" data-a="sav-edit" data-v="' + esc(e.id) + '"><span class="ico">' + (e.type === 'deposit' ? '🐷' : e.type === 'loan' ? '↗' : '➖') + '</span>' +
+      h += '<button class="tx" data-a="sav-edit" data-v="' + esc(e.id) + '"><span class="ico">' + ({ deposit: '🐷', loan: '↗', withdrawal: '➖', adjust: '⚖️' }[e.type] || '•') + '</span>' +
         '<span class="m"><span class="t" style="display:block">' + esc(e.name || SAV_LABEL[e.type]) + '</span><span class="c" style="white-space:normal;flex-wrap:wrap">' + C.formatDate(e.date) + ' · ' + SAV_LABEL[e.type] + (src ? ' de “' + esc(src.name) + '”' : '') +
         ((e.account || (src && src.account)) ? ' · 🏦 ' + esc(e.account || src.account) : '') + ' ' + state + '</span>' +
         (e.comment ? '<span class="c" style="display:block;white-space:normal">💬 ' + esc(e.comment) + '</span>' : '') + '</span>' +
-        '<span class="amt" style="color:' + col + (e.type === 'loan' && e.repaidAt ? ';text-decoration:line-through' : '') + '">' + sign + money(e.cents) + '</span></button>';
+        '<span class="amt" style="color:' + col + (e.type === 'loan' && e.repaidAt ? ';text-decoration:line-through' : '') + '">' + sign + money(Math.abs(e.cents)) + '</span></button>';
     });
     h += '</div><p class="note">Solo se guarda en este iPhone. No se mezcla con tu presupuesto ni con la conciliación.</p>';
     return h;
@@ -604,7 +605,7 @@
     const shown = list.slice(0, f.limit);
     const row = (e) => '<button class="tx' + (e.treatment === 'excluded' ? ' excluded' : '') + '" data-a="edit-entry" data-v="' + esc(e.id) + '"><span class="ico">' + (e.treatment === 'refund' ? '↩︎' : catIcon(e.category)) + '</span>' +
       '<span class="m"><span class="t" style="display:block">' + esc(e.description || '(sin descripción)') + '</span>' + (e.comment ? '<span class="c" style="display:block;overflow:hidden;text-overflow:ellipsis">💬 ' + esc(e.comment) + '</span>' : '') + '<span class="c"><span class="cat">' + esc(e.category || 'Sin categoría') + (e.subcategory ? ' › ' + esc(e.subcategory) : '') +
-      (e.treatment === 'refund' ? ' · reembolso' : '') + '</span>' + (STATUS_PILL[e.status] || '') + (!e.resolved && e.status !== 'possible' ? '<span class="pill mut">sin revisar</span>' : '') + '</span></span>' + signedMoney(e) + '</button>';
+      (e.treatment === 'refund' ? ' · reembolso' : '') + (e.tagFix ? ' 🔁' : '') + '</span>' + (STATUS_PILL[e.status] || '') + (!e.resolved && e.status !== 'possible' ? '<span class="pill mut">sin revisar</span>' : '') + '</span></span>' + signedMoney(e) + '</button>';
     if (f.sort === 'date') {
       const days = {}; const order = [];
       shown.forEach((e) => { if (!days[e.date]) { days[e.date] = []; order.push(e.date); } days[e.date].push(e); });
@@ -728,10 +729,11 @@
     }
     return '<div class="mv">' + head + '<div class="actions"><button data-a="toshl-keep" data-v="' + esc(e.id) + '">Mantener</button><button data-a="quick-exclude" data-v="' + esc(e.id) + '">Excluir</button><button class="chg" data-a="link" data-v="' + esc(e.id) + '">⇄ Enlazar…</button></div></div>';
   }
+  const tagFixLine = (e) => (e.tagFix ? '<div class="comment" style="background:var(--accent-soft)">🔁 Etiqueta corregida: “' + esc(e.tagFix.from || 'sin etiqueta') + '” → “' + esc(e.tagFix.to) + '” ' + (e.tagFix.why === 'regla' ? '(tu regla)' : '(según el banco)') + '</div>' : '');
   function matchedCard(e) {
     const days = e.bankDate && e.bankDate !== e.date ? ' (' + (C.diffDays(e.date, e.bankDate) > 0 ? '+' : '') + C.diffDays(e.date, e.bankDate) + ' d)' : '';
     return '<button class="mv" style="width:100%;text-align:left;display:block" data-a="edit-entry" data-v="' + esc(e.id) + '"><div class="top"><div><div class="desc">' + esc(e.description) + ' · ' + esc(e.category) + (e.subcategory ? ' › ' + esc(e.subcategory) : '') + '</div>' +
-      '<div class="meta">Toshl ' + C.formatDateShort(e.date) + ' ↔ Banco ' + C.formatDateShort(e.bankDate) + days + ' · ' + esc(e.bankDescription) + '</div></div>' + signedMoney(e) + '</div>' + commentLine(e.comment) + '</button>';
+      '<div class="meta">Toshl ' + C.formatDateShort(e.date) + ' ↔ Banco ' + C.formatDateShort(e.bankDate) + days + ' · ' + esc(e.bankDescription) + '</div></div>' + signedMoney(e) + '</div>' + tagFixLine(e) + commentLine(e.comment) + '</button>';
   }
 
   // ───────────────────────── Importar ─────────────────────────
@@ -808,7 +810,12 @@
   function learnFromMatch(m) {
     if (m.toshlIds.length !== 1) return;
     const t = S.movements[m.toshlIds[0]]; if (!t || t.cents > 0 || !t.category) return;
-    m.bankIds.forEach((bid) => { const b = S.movements[bid]; if (b) S.rules = C.learnRule(S.rules, b.description, t.category, t.subcategory, 'expense', false); });
+    const tags = [...new Set(Object.values(S.movements).filter((x) => x.source === 'toshl' && x.category === t.category && x.subcategory).map((x) => x.subcategory))];
+    m.bankIds.forEach((bid) => {
+      const b = S.movements[bid]; if (!b) return;
+      const fix = C.fixBillTag([b], t.category, t.subcategory, S.rules, tags);
+      S.rules = C.learnRule(S.rules, b.description, t.category, fix ? fix.to : t.subcategory, 'expense', false);
+    });
   }
   async function commitImport() {
     const d = UI.draft; if (!canCommit()) return;
@@ -920,7 +927,7 @@
     const subs = [...new Set(L.all.filter((x) => x.category === e.category && x.subcategory).map((x) => x.subcategory))];
     let body = '<div class="origin' + (e.bankIds.length && !e.toshlIds.length ? ' bank' : '') + '"><div class="row-between"><b style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.description || '(sin descripción)') + '</b>' + signedMoney(e) + '</div>' +
       '<div class="sub">' + C.formatDate(e.date) + ' · ' + (STATUS_PILL[e.status] || '') + (e.bankDescription && e.bankDescription !== e.description ? '<br>Banco: ' + esc(e.bankDescription) : '') + '</div>' + commentLine(e.comment) + '</div>';
-    body += explainBlock(e);
+    body += tagFixLine(e) + explainBlock(e);
     body += '<div class="seg" id="treat-seg">' + ['expense', 'income', 'refund', 'excluded'].map((t) => '<button class="' + (e.treatment === t ? 'on' : '') + '" data-a="edit-treat" data-v="' + t + '">' + TREAT_LABEL[t] + '</button>').join('') + '</div>';
     body += '<label class="field"><span>Categoría</span><select class="select" id="ed-cat">' + catOptions(e.category, true) + '<option value="__new">+ Nueva categoría…</option></select></label>' +
       '<label class="field hidden" id="ed-new-wrap"><span>Nombre de la nueva categoría</span><input class="input" id="ed-new" autocomplete="off"></label>' +
@@ -945,7 +952,7 @@
     mutate('Guardado', () => {
       if (cat && !S.categories[cat]) S.categories[cat] = { icon: guessIcon(cat), type: treatment === 'income' ? 'income' : 'variable' };
       S.decisions[id] = { category: cat, subcategory: sub, treatment };
-      if (learn && e.bankDescription) S.rules = C.learnRule(S.rules, e.bankDescription.split(' + ')[0], cat, sub, treatment, false);
+      if (learn && e.bankDescription) S.rules = C.learnRule(S.rules, e.bankDescription.split(' + ')[0], cat, sub, treatment, false, true);
     });
   }
 
@@ -1326,7 +1333,7 @@
       if (e.treatment === 'refund' && !e.category) { toast('Elige de qué categoría se resta'); return; }
       mutate('Aceptado', () => {
         S.decisions[v] = { category: e.category, subcategory: e.subcategory, treatment: e.treatment };
-        if (e.bankDescription && e.treatment !== 'excluded') S.rules = C.learnRule(S.rules, e.bankDescription, e.category, e.subcategory, e.treatment, false);
+        if (e.bankDescription && e.treatment !== 'excluded') S.rules = C.learnRule(S.rules, e.bankDescription, e.category, e.subcategory, e.treatment, false, true);
       });
     },
     'quick-cat': (v) => {
@@ -1334,7 +1341,7 @@
       mutate(cat + ' asignado', () => {
         const treatment = e.sign > 0 ? 'refund' : 'expense';
         S.decisions[id] = { category: cat, subcategory: '', treatment };
-        if (e.bankDescription) S.rules = C.learnRule(S.rules, e.bankDescription, cat, '', treatment, false);
+        if (e.bankDescription) S.rules = C.learnRule(S.rules, e.bankDescription, cat, '', treatment, false, true);
       });
     },
     'quick-exclude': (v) => { const e = findEntry(v); if (!e) return; mutate('Excluido', () => { S.decisions[v] = { category: e.category, subcategory: e.subcategory, treatment: 'excluded' }; }); },
@@ -1344,7 +1351,7 @@
       if (t === 'refund') { mutate('Reembolso: elige la categoría', () => { S.decisions[id] = { category: e.category || '', subcategory: '', treatment: 'refund' }; }, { silent: true }); return; }
       mutate(TREAT_LABEL[t], () => {
         S.decisions[id] = { category: t === 'income' ? (e.category && isIncomeCat(e.category) ? e.category : (L.known.find(isIncomeCat) || '')) : e.category, subcategory: '', treatment: t };
-        if (e.bankDescription) S.rules = C.learnRule(S.rules, e.bankDescription, S.decisions[id].category, '', t, false);
+        if (e.bankDescription) S.rules = C.learnRule(S.rules, e.bankDescription, S.decisions[id].category, '', t, false, true);
       });
     },
     'edit-entry': (v) => openEditEntry(v),
@@ -1457,7 +1464,33 @@
       const n2 = prompt('Repite el nuevo PIN'); if (n1 !== n2) { toast('No coinciden'); return; }
       await setPin(n1); toast('PIN cambiado');
     },
-    'sav-edit': (v) => openSavingsForm(null, v),
+    'sav-edit': (v) => {
+      const e = S.savings.entries.find((x) => x.id === v); if (!e) return;
+      if (e.type !== 'adjust') { openSavingsForm(null, v); return; }
+      openSheet('Ajuste de saldo', '<p>' + esc(e.account || 'Sin cuenta') + ' · ' + C.formatDate(e.date) + '</p><p class="sub">' + esc(e.comment || '') + '</p>' +
+        '<p style="margin-top:8px">Diferencia aplicada: <b>' + money(e.cents, { sign: true }) + '</b></p><button class="btn danger" style="margin-top:14px" data-a="sav-del" data-v="' + esc(e.id) + '">Borrar ajuste</button>');
+    },
+    'sav-adjust': (v) => {
+      const acc = C.savingsSummary(S.savings.entries).accounts.find((a) => a.name === v);
+      const cur = acc ? acc.available : 0;
+      UI.adjAccount = v; UI.adjCurrent = cur;
+      openSheet('Saldo real de ' + v, '<p class="sub">El saldo de tu cuenta manda. Escribe lo que ves hoy en ' + esc(v) + ' y la app apunta la diferencia como “Ajuste de saldo”.</p>' +
+        '<div class="kv" style="margin-top:10px"><span>En la app ahora</span><b>' + money(cur) + '</b></div>' +
+        '<label class="field"><span>Saldo real hoy</span><input class="input" id="adj-real" inputmode="decimal" placeholder="Ej. 1.250,30" autocomplete="off" data-i="adj-live"></label>' +
+        '<label class="field"><span>Comentario (opcional)</span><input class="input" id="adj-comment" placeholder="Ej. intereses, cargo de la cuenta…" autocomplete="off"></label>' +
+        '<p class="sub" id="adj-diff" style="margin-top:8px"></p>', '<button class="btn" data-a="sav-adjust-save">Guardar saldo real</button>');
+    },
+    'sav-adjust-save': () => {
+      const real = C.parseAmount($('#adj-real').value);
+      if (!Number.isFinite(real) || $('#adj-real').value.trim() === '') { toast('Escribe el saldo (ej. 1250 o 1.250,30)'); return; }
+      const diff = real - UI.adjCurrent;
+      if (diff === 0) { closeSheet(); toast('Ya cuadra: no hace falta ajuste'); return; }
+      const comment = ($('#adj-comment').value.trim() ? $('#adj-comment').value.trim() + ' · ' : '') + 'saldo real ' + money(real);
+      closeSheet();
+      mutate(UI.adjAccount + ': saldo actualizado (' + money(diff, { sign: true }) + ')', () => {
+        S.savings.entries.push({ id: 's_' + C.hashId(String(Date.now()) + Math.random()), createdAt: Date.now(), type: 'adjust', cents: diff, date: today(), name: 'Ajuste de saldo', account: UI.adjAccount, comment });
+      });
+    },
     'sav-type': (v) => {
       UI.savType = v; $$('#sav-type button').forEach((b) => b.classList.toggle('on', b.dataset.v === v));
       $('#sav-help').textContent = savHelp(v);
@@ -1546,7 +1579,7 @@
       const e = findEntry(v); if (!e || !el.value) return;
       mutate('Reembolso de ' + el.value, () => {
         S.decisions[v] = { category: el.value, subcategory: '', treatment: 'refund' };
-        if (e.bankDescription) S.rules = C.learnRule(S.rules, e.bankDescription, el.value, '', 'refund', false);
+        if (e.bankDescription) S.rules = C.learnRule(S.rules, e.bankDescription, el.value, '', 'refund', false, true);
       });
     },
     'imp-file': async (v, el) => {
@@ -1574,6 +1607,10 @@
     },
   };
   const IN = {
+    'adj-live': (v, el) => {
+      const real = C.parseAmount(el.value); const out = $('#adj-diff'); if (!out) return;
+      out.textContent = Number.isFinite(real) && el.value.trim() ? (real === UI.adjCurrent ? 'Ya cuadra.' : 'Se apuntará un ajuste de ' + money(real - UI.adjCurrent, { sign: true }) + '.') : '';
+    },
     'bed-sum': () => bedRecalc(),
     'pin-in': async (v, el) => {
       if (v !== 'check' || el.value.length < 4) return;

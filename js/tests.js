@@ -292,6 +292,27 @@
     const o2 = C.periodOutlook({ income: 300000, spentTotal: 100000, pendingTotal: 50000, available: 20000 }, { cents: 500000, date: '2026-11-01' }, 150000);
     eq(o2.opening, 350000); eq(o2.savings, 130000); eq(o2.endBalance, 430000); eq(o2.opening + o2.savings + o2.other, o2.endBalance); eq(o2.other, -50000);
   });
+  test('Recibo con etiqueta cruzada en Toshl: se corrige según el banco', () => {
+    const tel = [{ description: 'Recibo TELEFONICA DE ESPANA, S. A. U.', bankSubcategory: 'Teléfono, TV e internet' }];
+    const end = [{ description: 'Recibo ENDESA ENERGIA, S.A.', bankSubcategory: 'Luz y gas' }];
+    const tags = ['electricidad', 'agua', 'internet'];
+    eq(C.fixBillTag(tel, 'House Services', 'electricidad', [], tags).to, 'internet');
+    eq(C.fixBillTag(end, 'House Services', 'agua', [], tags).to, 'electricidad');
+    eq(C.fixBillTag(end, 'House Services', 'electricidad', [], tags), null, 'ya correcta');
+    eq(C.fixBillTag(end, 'House Services', 'casa', [], tags), null, 'etiqueta propia no de recibos: no se toca');
+    const rules = C.learnRule([], 'Recibo TELEFONICA DE ESPANA', 'House Services', 'fibra', 'expense', false, true);
+    eq(C.fixBillTag(tel, 'House Services', 'internet', rules, tags).to, 'fibra', 'tu regla gana');
+    eq(C.learnRule(rules, 'Recibo TELEFONICA', 'House Services', 'electricidad', 'expense', false, false)[0].subcategory, 'fibra', 'lo automático no pisa tu corrección');
+    const mv = { t1: { id: 't1', source: 'toshl', date: '2026-11-13', cents: -7825, category: 'House Services', subcategory: 'electricidad' },
+      b1: { id: 'b1', source: 'bank', date: '2026-11-13', cents: -7825, description: 'Recibo TELEFONICA DE ESPANA, S. A. U.', bankSubcategory: 'Teléfono, TV e internet' },
+      t2: { id: 't2', source: 'toshl', date: '2026-10-13', cents: -8265, category: 'House Services', subcategory: 'internet' } };
+    const e = C.buildLedger({ movements: mv, matches: { x: { id: 'x', toshlIds: ['t1'], bankIds: ['b1'], status: 'auto' } }, decisions: {}, rules: [] }).find((x) => x.id === 'm:x');
+    eq([e.subcategory, e.tagFix.from], ['internet', 'electricidad']);
+  });
+  test('Ahorros: ajuste al saldo real de una cuenta', () => {
+    const s = C.savingsSummary([{ id: 'a', type: 'deposit', cents: 50000, account: 'N26' }, { id: 'b', type: 'adjust', cents: 1234, account: 'N26' }, { id: 'c', type: 'adjust', cents: -500, account: 'ING' }, { id: 'd', type: 'deposit', cents: 20000, account: 'ING' }]);
+    eq(s.accounts.find((x) => x.name === 'N26').available, 51234); eq(s.accounts.find((x) => x.name === 'ING').available, 19500); eq(s.total, 70734);
+  });
   test('Día de pago deducido del historial', () => {
     const d = C.inferDueDays([{ category: 'Rent', treatment: 'expense', date: '2026-10-01' }, { category: 'House Services', subcategory: 'agua', treatment: 'expense', date: '2026-10-05' }], ['Rent', 'House Services']);
     eq(d.Rent, 1); eq(d['House Services|agua'], 5);
